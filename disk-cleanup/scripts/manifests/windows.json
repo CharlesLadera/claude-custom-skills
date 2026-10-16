@@ -1,0 +1,14 @@
+{
+  "os": "windows",
+  "entries": [
+    {"id": "recycle-bin", "path": "C:/$Recycle.Bin", "tier": "free",
+     "why": "Already discarded by the user.",
+     "regen": "Nothing regenerates.", "command": null},
+    {"id": "user-temp", "path": "~/AppData/Local/Temp", "tier": "free",
+     "why": "Temporary files; the OS treats this directory as disposable.",
+     "regen": "Recreated on demand.", "command": null},
+    {"id": "npm-cache", "path": "~/AppData/Roaming/npm-cache", "tier": "cheap",
+     "why": "npm package cache.", "regen": "Redownloaded per package.",
+     "command": "npm cache clean --force"}
+  ]
+}

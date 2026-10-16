@@ -1,0 +1,17 @@
+{
+  "os": "linux",
+  "entries": [
+    {"id": "user-trash", "path": "~/.local/share/Trash", "tier": "free",
+     "why": "Freedesktop trash directory; already discarded by the user.",
+     "regen": "Nothing regenerates.", "command": null},
+    {"id": "xdg-cache", "path": "~/.cache", "tier": "costly",
+     "why": "XDG cache root. Disposable by specification, but it can hold multi-GB model caches (Whisper, Hugging Face) that are slow to redownload.",
+     "regen": "Each application rebuilds its own cache on next use.", "command": null},
+    {"id": "npm-cache", "path": "~/.npm", "tier": "cheap",
+     "why": "npm package cache.", "regen": "Redownloaded per package.",
+     "command": "npm cache clean --force"},
+    {"id": "apt-archives", "path": "/var/cache/apt/archives", "tier": "cheap",
+     "why": "Downloaded .deb files already installed.",
+     "regen": "Redownloaded only on reinstall.", "command": "apt-get clean"}
+  ]
+}

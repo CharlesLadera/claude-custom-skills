@@ -1,0 +1,47 @@
+# claude-custom-skills
+
+Personal Claude Code skill library. Each top-level directory containing a `SKILL.md` is one skill.
+
+## Editing here edits a live tool
+
+Every skill directory is symlinked from `~/.claude/skills/<name>`. There is no install step — a save takes effect immediately, in this session and every other.
+
+A live skill also follows whichever branch this repo has checked out. Developing a skill on a feature branch changes that skill's behavior everywhere until it merges, and switching back to `main` silently reverts it. Merge before relying on a change.
+
+When re-linking a skill that already exists in `~/.claude/skills/`, diff both ways first — never assume the repo is the newer side.
+
+## Most of these are behavior specs, not code
+
+Most skills are prose: no build, no lint, no tests. "Verified" means re-read for contract consistency with sibling skills; it does not mean a command exited 0. Don't claim a skill works because the file was written.
+
+Three ship real code, and those are judged the ordinary way:
+
+- `context-audit/scripts/audit.py` — a script, no test suite.
+- `disk-cleanup/` — `scripts/scan.py`, `scripts/classify.py`, and 287 tests run by `disk-cleanup/tests/run.sh`. Run them before and after changing anything there.
+- `gmail-organize/` — `scripts/scan.py` (read-only), `apply/apply.py` (the only writer), `lib/gws.py`, and the tests run by `gmail-organize/tests/run.sh`. Run them before and after changing anything there.
+
+`disk-cleanup/tests/test_safety.py` is load-bearing, not housekeeping: it fails the suite if any deletion or move primitive appears in a file under `disk-cleanup/scripts/`, which is what makes the scanner structurally incapable of deleting. Deletion lives in `SKILL.md`, after approval, by design. Never weaken that test to make a change pass — if a change seems to need it, the change is wrong.
+
+`gmail-organize/tests/test_safety.py` plays the same role: it fails the suite if a write method appears in `scripts/` or `lib/`, if `apply.py`'s write allowlist changes, or if anything other than `scan.gws_read` and `apply.gws_call` reaches `gws`. Same rule — never weaken it to make a change pass.
+
+Where a skill embeds a shell snippet, run it against a scratch directory before shipping it — those are the parts that can actually be wrong in a checkable way. Even that is not enough on its own: `disk-cleanup`'s snippets passed in a scratch tree and still broke on the real machine twice, once on a GNU `du` flag BSD accepts and silently ignores, and once on a macOS privacy denial that made an approved removal fail without the skill noticing. Run it against the real thing before believing it.
+
+## Families share a format through one owner
+
+Where several skills read and write the same file, exactly one owns the format and the rest reference it by name:
+
+- `end-of-day` owns the session journal (`docs/custom-agents/memory/sessions/<slug>.md`) — its frontmatter and slug rules. `start-of-day` and `log-session` follow it. Its `🗣 For the daily report` and `🎯 Next Session Plan` sections exist for a later session that aggregates every journal into one report.
+- `start-ticket` owns the ticket-workflow config keys and the task-file layout. `resume-ticket`, `finish-ticket`, and `ticket-status` follow it.
+- `start-ticket` also owns the **Context home** rule (`contextBranch` and local mode: config discovery from the main checkout first, where `docs/custom-agents/` lives, how it is committed or why it never is). Every skill that touches that folder — the ticket family, the journaling trio, `save-conversation`, `daily-report` — applies it by reference.
+
+Change an owner and check its siblings in the same pass. A sibling that restates a format instead of pointing at its owner is how the two drift apart — that drift was the cause of every broken cross-skill contract found in the 2026-09-17 audit.
+
+## Layout
+
+Directories stay flat: `~/.claude/skills/` is a flat namespace, so a directory name is exactly the name it installs under. Don't nest skills into bundle folders — it breaks existing symlinks for no gain.
+
+`statusline/` is a config artifact, not a skill. `docs/` is gitignored and lives only on this machine — this repo runs the Context home rule's local mode, so journaling skills write there and commit nothing. Never `git add -f` anything under it. `docs/custom-agents/` holds this repo's own session journals. `docs/superpowers/` holds the design spec, implementation plan, and decision record behind `disk-cleanup` — the decision record lists every ruling made while building it, with what each costs if wrong.
+
+## Git
+
+Push requires the `CharlesLadera` GitHub account. The wrong account fails as "Repository not found", not as an auth error.

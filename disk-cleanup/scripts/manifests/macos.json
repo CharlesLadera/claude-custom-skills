@@ -1,0 +1,80 @@
+{
+  "os": "macos",
+  "entries": [
+    {"id": "user-trash", "path": "~/.Trash", "tier": "free",
+     "why": "Already discarded by the user; emptying is the Trash's purpose.",
+     "regen": "Nothing regenerates; items are gone permanently.", "command": null},
+
+    {"id": "user-logs", "path": "~/Library/Logs", "tier": "free",
+     "why": "Application logs, rewritten as apps run. Needs Full Disk Access to remove - without it, trashing this path fails with a TCC permission error.",
+     "regen": "Recreated automatically on next launch.", "command": null},
+
+    {"id": "browser-cache-brave", "path": "~/Library/Caches/BraveSoftware", "tier": "free",
+     "why": "Browser HTTP cache. Often the single largest cache.",
+     "regen": "Refills as pages are revisited; costs page-load time only.", "command": null},
+
+    {"id": "browser-cache-google", "path": "~/Library/Caches/Google", "tier": "free",
+     "why": "Chrome HTTP cache.",
+     "regen": "Refills as pages are revisited.", "command": null},
+
+    {"id": "vscode-shipit", "path": "~/Library/Caches/com.microsoft.VSCode.ShipIt", "tier": "free",
+     "why": "Downloaded VS Code updates already applied.",
+     "regen": "Redownloaded only if an update is re-run.", "command": null},
+
+    {"id": "node-gyp-cache", "path": "~/Library/Caches/node-gyp", "tier": "cheap",
+     "why": "Cached Node headers for native builds.",
+     "regen": "Redownloaded on next native module build.", "command": null},
+
+    {"id": "npm-cache", "path": "~/.npm", "tier": "cheap",
+     "why": "npm package cache.",
+     "regen": "Redownloaded per package on next install.",
+     "command": "npm cache clean --force"},
+
+    {"id": "pnpm-store", "path": "~/Library/Caches/pnpm", "tier": "cheap",
+     "why": "pnpm content-addressable store.",
+     "regen": "Redownloaded on next install.", "command": "pnpm store prune"},
+
+    {"id": "homebrew-cache", "path": "~/Library/Caches/Homebrew", "tier": "cheap",
+     "why": "Downloaded bottles already installed.",
+     "regen": "Redownloaded only on reinstall.", "command": "brew cleanup"},
+
+    {"id": "uv-cache", "path": "~/.cache/uv", "tier": "costly",
+     "why": "uv Python wheel cache. Often several GB.",
+     "regen": "Redownloads and rebuilds wheels; several GB and minutes of build time.",
+     "command": null},
+
+    {"id": "whisper-models", "path": "~/.cache/whisper", "tier": "costly",
+     "why": "Whisper model weights. The transcribe-video skill in this repo depends on these files.",
+     "regen": "Redownloads up to 2.9G per model on the next transcription run.",
+     "command": null},
+
+    {"id": "convex-cache", "path": "~/.cache/convex", "tier": "cheap",
+     "why": "Convex CLI cache.",
+     "regen": "Rebuilt on next Convex command.", "command": null},
+
+    {"id": "pre-commit-cache", "path": "~/.cache/pre-commit", "tier": "cheap",
+     "why": "pre-commit hook environments.",
+     "regen": "Rebuilt on next hook run - about a minute per repo, considerably longer for hooks that compile their own environments.", "command": null},
+
+    {"id": "python-cache", "path": "~/Library/Caches/com.apple.python", "tier": "free",
+     "why": "Bytecode cache.",
+     "regen": "Regenerated transparently on import.", "command": null},
+
+    {"id": "derived-data", "path": "~/Library/Developer/Xcode/DerivedData", "tier": "project",
+     "why": "Xcode build intermediates. Rebuildable, but a rebuild is slow.",
+     "regen": "Full project rebuild on next Xcode build.", "command": null},
+
+    {"id": "ios-device-support", "path": "~/Library/Developer/Xcode/iOS DeviceSupport", "tier": "costly",
+     "why": "Symbol sets per iOS version. Only needed for devices you still debug.",
+     "regen": "Re-extracted from the device on next connect, which is slow - and impossible if you no longer have that device.", "command": null},
+
+    {"id": "coresimulator-caches", "path": "~/Library/Developer/CoreSimulator/Caches", "tier": "cheap",
+     "why": "Simulator runtime caches, not the runtimes themselves.",
+     "regen": "Rebuilt on next simulator boot.", "command": null},
+
+    {"id": "docker-images", "path": "__command_only__docker", "tier": "costly",
+     "why": "Stopped containers and build cache, which `docker system prune` removes. Dangling images go too, but Docker does not report their size separately, so the figure shown counts only containers and build cache and understates the real reclaim. Anonymous volumes are NOT removed - that needs a separate --volumes flag this command does not pass.",
+     "regen": "Images re-download or rebuild, often many GB. Stopped containers are deleted outright: anything written inside them since they last started is lost and cannot be regenerated.",
+     "command": "docker system prune"}
+  ]
+}
