@@ -122,14 +122,14 @@ Record each source's status: `ok`, `partial` (some calls failed — say which), 
 - **Top-level Did / Next / Blockers**: the 2–5 most significant items each across projects, focus topic first. Blockers: "none" when empty.
 - **Carried over**: each item from step 4 → `- [x]` when a Did item covers it, else `- [ ]`.
 - **Read aloud**: 3–4 first-person sentences, ~30 seconds: what got done, what's next, blockers.
-- **No activity**: when no source has a `did` or `ask`, still write the report. **Did** is the single line `- No activity in window`. **Next** and **Blockers** still come from this run's `next` and `blocker` items; then each open carried-over item is added word for word to the section it came from in step 4 (so the next run carries it again), skipping one already covered by a current item. A section left empty is "none".
+- **No activity**: when no source has a `did` or `ask`, still write the report. **Did** is the single line `- No activity in window`. **Next** and **Blockers** still come from this run's `next` and `blocker` items; then each open carried-over item is added word for word to the section it came from in step 4 (so the next run carries it again). When a current item is the same work as a carryover, write it in the carryover's exact wording; then, within the same section, skip every carryover whose text matches a current item after trimming and collapsing whitespace. A section left empty is "none".
 
 **Write the standup document:**
 
 ```markdown
 ---
 date: <YYYY-MM-DD>
-focus: "<topic the user specified, or General>"      ← YAML double-quoted: escape \ and " with a backslash, collapse newlines to spaces
+focus: "<topic the user specified, or General>"
 window_start: <window_start>
 window_end: <window_end>
 sources:
@@ -169,6 +169,8 @@ tags: [daily-report]
 - <PM tool>: <status> <note>
 - Gmail: <status> <note>
 ```
+
+`focus` is a YAML double-quoted string: escape `\` and `"` with a backslash and collapse newlines to spaces, so a focus like `Release: API` stays valid.
 
 Keep the `**Did**` / `**Next**` / `**Blockers**` labels exactly: the next run parses them for carried-over items. Ticket IDs and URLs go only in the refs under By project and Inbox, never in Did/Next/Blockers or the read-aloud text.
 
