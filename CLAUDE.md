@@ -47,6 +47,8 @@ Directories stay flat: `~/.claude/skills/` is a flat namespace, so a directory n
 
 `.claude-plugin/marketplace.json` publishes the same directories as plugins without moving them. A skill that runs its own scripts must reach them through `${CLAUDE_SKILL_DIR}`, never `~/.claude/skills/<name>/` — a plugin install doesn't live there. Adding a skill means adding it to the marketplace too. Check with `claude plugin validate .`, then a real install: the validator never opens a plugin-root `SKILL.md`.
 
+Every marketplace entry pins `"version"`, all set to the current release. Plugin users stay on their cached copy until that string changes, so merging to `main` ships nothing to them. To release: set every entry's `version` to the new number in a PR, merge it, then tag `v<number>` on that merge commit. Forget the bump and plugin users never get the release. Keep `version` out of any `plugin.json`, because a manifest value silently overrides the entry.
+
 `statusline/` is a config artifact, not a skill. `docs/` is gitignored and lives only on this machine — this repo runs the Context home rule's local mode, so journaling skills write there and commit nothing. Never `git add -f` anything under it. `docs/custom-agents/` holds this repo's own session journals. `docs/superpowers/` holds the design spec, implementation plan, and decision record behind `disk-cleanup` — the decision record lists every ruling made while building it, with what each costs if wrong.
 
 ## Git
