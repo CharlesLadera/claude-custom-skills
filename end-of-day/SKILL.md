@@ -105,12 +105,21 @@ if git rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1; then echo "unpushed: $(git
 echo "== PR"; [ -n "$BRANCH" ] && gh pr list --head "$BRANCH" --base "$BASE_BRANCH" --state all --json number,state,url --jq '.[] | "#\(.number) \(.state) \(.url)"'
 echo "== in $BASE_BRANCH already?"; git merge-base --is-ancestor HEAD "$BASE_BRANCH" 2>/dev/null && echo merged || echo open
 echo "== journal $J"
-if [ -n "$SLUG" ] && [ -f "$J" ]; then
+JSRC="$J"
+if [ "$MODE" = default ] && [ "$BRANCH" = "$BASE_BRANCH" ] && [ -n "$SLUG" ]; then
+  # On the default branch the land chain appends to origin's copy — show that one
+  git fetch -q origin
+  JSRC=$(mktemp)
+  git show "origin/$BASE_BRANCH:docs/custom-agents/memory/sessions/$SLUG.md" > "$JSRC" 2>/dev/null || rm -f "$JSRC"
+  echo "(origin/$BASE_BRANCH's copy; local $BASE_BRANCH is $(git rev-list --count "HEAD..origin/$BASE_BRANCH") behind)"
+fi
+if [ -n "$SLUG" ] && [ -f "$JSRC" ]; then
   awk 'NR == 1, (NR > 1 && /^---$/) { print; next }
        /^## / { heads = heads $0 "\n"; last = "" }
        { last = last $0 "\n" }
-       END { printf "-- entries:\n%s-- last entry:\n%s", heads, last }' "$J"
+       END { printf "-- entries:\n%s-- last entry:\n%s", heads, last }' "$JSRC"
 else echo "(new journal)"; fi
+[ "$JSRC" = "$J" ] || rm -f "$JSRC"
 ```
 Everywhere below, `<default-branch>` is `$BASE_BRANCH` from this output.
 
@@ -203,7 +212,7 @@ last_updated: YYYY-MM-DD
 One Bash call runs the whole chain: code commit → push → PR → journal written → journal committed and landed → code merge. Fill the values from the gather and the answers; leave a step's value empty to skip it. On failure the chain stops and names the step — fix that and rerun from there, never from the top (the earlier steps already happened).
 
 Where the journal lands depends on the mode:
-- **default** — **7A always lands the journal on `main`**, CI-independent: the journal is committed on the branch, then that one commit is cherry-picked onto a throwaway branch off `origin/<default-branch>` and merged as a docs-only PR — no code, no waiting on the branch's CI. **Worktree-safe:** it never checks out the default branch in the current tree.
+- **default** — **7A always lands the journal on `main`**, CI-independent: the journal is committed on the branch, then that one commit is cherry-picked onto a throwaway branch off `origin/<default-branch>` and merged as a docs-only PR — no code, no waiting on the branch's CI. **Worktree-safe:** it never checks out the default branch in the current tree. **Run from the default branch itself** there is no branch to carry it, so the journal is written and committed only in that throwaway worktree — appended to `origin`'s copy — and local `<default-branch>` is fast-forwarded once the PR merges. It never gets a journal commit of its own, which would diverge from the merged PR.
 - **`contextBranch`** — the journal is committed in the main checkout straight onto `contextBranch` and pushed; that *is* the landing, so 7A is skipped and no context PR is opened. A rejected push stops the chain: report it — never pull, rebase or force in the shared checkout.
 - **local** — nothing is committed; writing the file was the landing. 7A is skipped, no context PR. Never `git add -f` the journal.
 
@@ -213,7 +222,8 @@ Where the journal lands depends on the mode:
 # ── Values from request 1 (gather) and request 2 (answers) ──
 MODE=<default|contextBranch|local>; HUB=<hub>; CA=<ca>; CTX_BRANCH=<contextBranch or "">; CTX_REMOTE=<remote>
 BRANCH=<branch>; BASE_BRANCH=<main|master>; SLUG=<slug>; TODAY=$(date +%F)
-J="$CA/memory/sessions/$SLUG.md"
+J="$CA/memory/sessions/$SLUG.md"; JR="docs/custom-agents/memory/sessions/$SLUG.md"   # JR: relative to a checkout root
+JOURNAL_NEW=<yes|no>                          # the gather printed "(new journal)" ⇒ yes
 CODE_PATHS=(<this session's paths>)          # () when there is nothing to commit
 CODE_MSG='<confirmed commit message>'         # '' = no code commit
 PUSH=<yes|no>
@@ -222,7 +232,12 @@ PR_TITLE='<confirmed title>'                  # '' = don't open one
 PR_BODY='<confirmed body>'
 MERGE=<yes|no>                                # Step 6's land decision
 STATUS=<active|paused|done>
-fail() { echo "FAILED at: $1 — fix it, then rerun from that step"; exit 1; }
+WT=""; CTX=""
+fail() {
+  echo "FAILED at: $1 — fix it, then rerun from that step"
+  [ -n "$WT" ] && { git worktree remove --force "$WT"; git branch -q -D "$CTX"; } 2>/dev/null
+  exit 1
+}
 
 # 4 — code commit, push, PR
 if [ -n "$CODE_MSG" ]; then
@@ -236,8 +251,21 @@ if [ -z "$PR" ] && [ -n "$PR_TITLE" ]; then
 fi
 
 # 6 — journal, appended (or created). New file: frontmatter + entry. Existing: the entry only.
-mkdir -p "$CA/memory/sessions"
-cat >> "$J" <<'JOURNAL'
+JW="$J"                                       # the file this run writes
+if [ "$MODE" = default ] && [ "$BRANCH" = "$BASE_BRANCH" ]; then
+  # On the default branch no branch carries the journal: write it only in 7A's worktree,
+  # so local $BASE_BRANCH never gets a commit that diverges from the merged context PR.
+  git fetch -q origin || fail "7A fetch"
+  CTX="context/$SLUG-$(date +%Y%m%d-%H%M%S)"
+  WT="$(mktemp -d)"
+  git worktree add -q -b "$CTX" "$WT" "origin/$BASE_BRANCH" || fail "7A worktree"
+  JW="$WT/$JR"
+fi
+# The gather decided new vs existing; if that changed since, appending would garble the file.
+if [ -f "$JW" ]; then [ "$JOURNAL_NEW" = no ] || fail "journal exists now (origin has one?) — rerun the gather"
+else [ "$JOURNAL_NEW" = yes ] || fail "journal missing (not on origin yet?) — rerun the gather"; fi
+mkdir -p "$(dirname "$JW")"
+cat >> "$JW" <<'JOURNAL'
 <the entry, in Step 6's format — `__PR__` and `__CODE_COMMIT__` where the PR number and new commit go>
 JOURNAL
 STATUS="$STATUS" TODAY="$TODAY" PR="$PR" CODE_COMMIT="${CODE_COMMIT:-}" perl -pi -e '
@@ -247,12 +275,11 @@ STATUS="$STATUS" TODAY="$TODAY" PR="$PR" CODE_COMMIT="${CODE_COMMIT:-}" perl -pi
     s/^last_updated:.*/last_updated: $ENV{TODAY}/;
     s/^pr:.*/pr: $ENV{PR}/ if length $ENV{PR};
   }
-  s/__PR__/$ENV{PR}/g; s/__CODE_COMMIT__/$ENV{CODE_COMMIT}/g;' "$J" || fail "journal refresh"
+  s/__PR__/$ENV{PR}/g; s/__CODE_COMMIT__/$ENV{CODE_COMMIT}/g;' "$JW" || fail "journal refresh"
 
 # 6/7 — land the journal
 case "$MODE" in
   contextBranch)
-    JR="docs/custom-agents/memory/sessions/$SLUG.md"   # relative to $HUB
     git -C "$HUB" add -f -- "$JR" \
       && git -C "$HUB" commit -q -m "docs(session): $SLUG $TODAY — end-of-day" -- "$JR" \
       && git -C "$HUB" push -q "$CTX_REMOTE" "$CTX_BRANCH" || fail "journal to $CTX_BRANCH (rejected push: stop, never pull/rebase/force)"
@@ -260,19 +287,23 @@ case "$MODE" in
   local)
     echo "journal: local only, not committed" ;;
   default)
-    git add -- "$J" && git commit -q -m "docs(session): $SLUG $TODAY — end-of-day" -- "$J" || fail "journal commit"
-    JOURNAL_SHA=$(git rev-parse HEAD)
-    [ "$PUSH" = yes ] && { git push -q || fail "journal push"; }
-    # 7A — land just the journal commit on the default branch
-    git fetch -q origin || fail "7A fetch"
-    CTX="context/$SLUG-$(git rev-parse --short "$JOURNAL_SHA")"   # per-journal name ⇒ never collides across days
-    WT="$(mktemp -d)"
-    git worktree add -q -b "$CTX" "$WT" "origin/$BASE_BRANCH" \
-      && git -C "$WT" cherry-pick "$JOURNAL_SHA" >/dev/null \
-      && git -C "$WT" push -q -u origin "$CTX"
+    if [ -z "$WT" ]; then                     # feature branch: it carries the journal commit too
+      git add -- "$J" && git commit -q -m "docs(session): $SLUG $TODAY — end-of-day" -- "$J" || fail "journal commit"
+      JOURNAL_SHA=$(git rev-parse HEAD)
+      [ "$PUSH" = yes ] && { git push -q || fail "journal push"; }
+      # 7A — land just the journal commit on the default branch
+      git fetch -q origin || fail "7A fetch"
+      CTX="context/$SLUG-$(git rev-parse --short "$JOURNAL_SHA")"   # per-journal name ⇒ never collides across days
+      WT="$(mktemp -d)"
+      git worktree add -q -b "$CTX" "$WT" "origin/$BASE_BRANCH" \
+        && git -C "$WT" cherry-pick "$JOURNAL_SHA" >/dev/null
+    else                                      # default branch: the commit exists only in the worktree
+      git -C "$WT" add -- "$JR" && git -C "$WT" commit -q -m "docs(session): $SLUG $TODAY — end-of-day" -- "$JR"
+    fi && git -C "$WT" push -q -u origin "$CTX"
     OK=$?
     git worktree remove --force "$WT" 2>/dev/null; git branch -q -D "$CTX" 2>/dev/null   # removal keeps the branch — drop the local copy
-    [ "$OK" = 0 ] || fail "7A cherry-pick/push of $CTX (a conflict means an earlier context PR for this journal hasn't merged yet — merge it, then rerun 7A)"
+    WT=""
+    [ "$OK" = 0 ] || fail "7A commit/push of $CTX (a cherry-pick conflict means an earlier context PR for this journal hasn't merged yet — merge it, then rerun 7A)"
     gh pr create --base "$BASE_BRANCH" --head "$CTX" \
       --title "docs(session): $SLUG context" --body "Session journal — code (if any) rides on $BRANCH." \
       && gh pr merge "$CTX" --merge --delete-branch || fail "7A context PR (if the repo requires checks: gh pr merge $CTX --auto --merge)"
@@ -285,12 +316,17 @@ if [ "$MERGE" = yes ] && [ -n "$PR" ]; then
 fi
 
 # Advance the local default branch (best-effort), so you see the context now
-git fetch -q origin; git fetch -q origin "$BASE_BRANCH:$BASE_BRANCH" 2>/dev/null || true
+git fetch -q origin
+if [ "$BRANCH" = "$BASE_BRANCH" ]; then
+  git merge -q --ff-only "origin/$BASE_BRANCH" || echo "local $BASE_BRANCH not fast-forwarded — pull it yourself"
+else
+  git fetch -q origin "$BASE_BRANCH:$BASE_BRANCH" 2>/dev/null || true   # no-op when it's checked out in another worktree
+fi
 ```
 - **Auto-merge unavailable** (repo setting off / no branch protection) → the chain prints the PR's checks. Merge now **only if** they show green or "no checks found" **and** the PR isn't conflicting → `gh pr merge <PR> --merge`. That one extra request is allowed.
 - **Checks red or PR conflicts** → don't force it; tell the user. The journal already landed (7A, `contextBranch`, or written locally), so context is safe — the code merges later from its still-open PR.
 
-7A already put the journal on `main`, so the branch carries an identical journal commit; whenever the branch merges (now or a later session) git reconciles it cleanly — no duplication. (With `contextBranch` or in local mode the branch carries no journal commit at all.) If the local default branch is checked out elsewhere, the last line does nothing — the next `/start-of-day` fetch reconciles it, and an auto-merge that completes after you've signed off lands the same way.
+7A already put the journal on `main`, so the branch carries an identical journal commit; whenever the branch merges (now or a later session) git reconciles it cleanly — no duplication. (With `contextBranch`, in local mode, or run from the default branch, the current branch carries no journal commit at all.) If the local default branch is checked out in another worktree, the last lines do nothing — the next `/start-of-day` fetch reconciles it, and an auto-merge that completes after you've signed off lands the same way.
 
 ### 8. Report (request 4 — text only)
 From the chain's output, no further calls. Report: session file path, resolved `status`, the branch's push state and PR URL, where the journal landed — the **context PR** on `main`, the commit sha pushed to `contextBranch`, or "local only, not committed" — and whether the **code** is merging (whole-branch auto-merge) or staying on the branch for later. If any changes were left untouched as unrelated, list them with the reminder to branch them separately. If `status: done`, note it drops off the default `/start-of-day` list. End with the entry's **🎯 Next Session Plan** and **🗣 For the daily report** lines quoted back, so the user can confirm what the daily-report session will pick up.
