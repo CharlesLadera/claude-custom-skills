@@ -77,6 +77,17 @@ format_tokens() {
   }'
 }
 
+# Format a raw integer as a short count (e.g. "950", "217K", "1.8M", "9.5B")
+format_short() {
+  echo "$1" | awk '{
+    n = $1 + 0
+    if      (n >= 1e9) printf "%.1fB", n / 1e9
+    else if (n >= 1e6) printf "%.1fM", n / 1e6
+    else if (n >= 1e3) printf "%.0fK", n / 1e3
+    else               printf "%d", n
+  }'
+}
+
 now=$(date +%s)
 
 # ── Session duration ─────────────────────────────────────────────────────────
@@ -160,6 +171,84 @@ if [ -n "$used" ]; then
   fi
 fi
 
+# ── Cache read / write tokens ────────────────────────────────────────────────
+# Last request from context_window.current_usage; session totals summed from the
+# transcript. Transcripts reach ~50MB, so each refresh scans only the bytes
+# appended since the previous one and keeps running totals in a state file.
+last_read=$(echo "$input" | jq -r '.context_window.current_usage.cache_read_input_tokens // empty')
+last_write=$(echo "$input" | jq -r '.context_window.current_usage.cache_creation_input_tokens // empty')
+transcript=$(echo "$input" | jq -r '.transcript_path // empty')
+
+sum_read=""
+sum_write=""
+if [ -n "$session_id" ] && [ -f "$transcript" ]; then
+  TOKENS_FILE="${TMPDIR:-/tmp}/claude_tokens_${session_id}"
+  offset=0; sum_read=0; sum_write=0; last_req=""
+  if [ -f "$TOKENS_FILE" ]; then
+    read -r offset sum_read sum_write last_req < "$TOKENS_FILE"
+    # Only digits reach $(( )): arithmetic expansion would run a planted $(...).
+    case "${offset}x${sum_read}x${sum_write}" in
+      *[!0-9x]*|x*|*xx*|*x) offset=0; sum_read=0; sum_write=0; last_req="" ;;
+    esac
+  fi
+  size=$(wc -c < "$transcript" | tr -d ' ')
+  if [ "$size" -lt "$offset" ]; then
+    offset=0; sum_read=0; sum_write=0; last_req=""
+  fi
+  if [ "$size" -gt "$offset" ]; then
+    chunk_len=$(( size - offset ))
+    # One line per API response chunk; lines of one request share a requestId
+    # and the same usage, so each request is counted once. Subagent lines are
+    # skipped: the totals describe this conversation's own context.
+    scanned=$(tail -c +$(( offset + 1 )) "$transcript" | head -c "$chunk_len" | LC_ALL=C awk -v len="$chunk_len" -v last="$last_req" '
+      {
+        bytes += length($0) + 1
+        lb[NR] = length($0) + 1
+        if ($0 ~ /"type":"assistant"/ && $0 !~ /"isSidechain":true/ && match($0, /"cache_read_input_tokens":[0-9]+/)) {
+          r[NR] = substr($0, RSTART + 26, RLENGTH - 26)
+          w[NR] = 0
+          if (match($0, /"cache_creation_input_tokens":[0-9]+/)) w[NR] = substr($0, RSTART + 30, RLENGTH - 30)
+          q[NR] = ""
+          if (match($0, /"requestId":"[^"]*"/)) q[NR] = substr($0, RSTART + 13, RLENGTH - 14)
+        }
+      }
+      END {
+        n = NR; used = bytes
+        # A last line with no newline is still being written: leave it for the next refresh.
+        if (bytes > len) { n = NR - 1; used = bytes - lb[NR] }
+        for (i = 1; i <= n; i++) if (i in r) {
+          if (q[i] != "" && q[i] == last) continue
+          sr += r[i]; sw += w[i]; last = q[i]
+        }
+        printf "%d %d %d %s\n", used, sr, sw, last
+      }')
+    read -r used add_read add_write new_req <<EOF
+$scanned
+EOF
+    case "${used}x${add_read}x${add_write}" in
+      *[!0-9x]*|x*|*xx*|*x) ;;
+      *)
+        offset=$(( offset + used ))
+        sum_read=$(( sum_read + add_read ))
+        sum_write=$(( sum_write + add_write ))
+        last_req="$new_req"
+        echo "$offset $sum_read $sum_write $last_req" > "$TOKENS_FILE"
+        ;;
+    esac
+  fi
+fi
+
+cache_str=""
+if [ -n "$last_read" ] || [ -n "$sum_read" ]; then
+  read_part="📖 Read $(format_short "${last_read:-0}")"
+  write_part="✍ Write $(format_short "${last_write:-0}")"
+  if [ -n "$sum_read" ]; then
+    read_part="${read_part} (Σ $(format_short "$sum_read"))"
+    write_part="${write_part} (Σ $(format_short "$sum_write"))"
+  fi
+  cache_str="${read_part}  ${write_part}"
+fi
+
 # ── Rate limits ──────────────────────────────────────────────────────────────
 five_pct=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty')
 five_reset=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at // empty')
@@ -226,6 +315,7 @@ fi
 # ── Cost estimate ────────────────────────────────────────────────────────────
 cost_str=""
 cost_val=$(echo "$input" | jq -r '
+  .cost.total_cost_usd //
   .cost_usd           //
   .usage.cost         //
   .session_cost       //
@@ -246,6 +336,10 @@ fi
 
 if [ -n "$ctx_str" ]; then
   out="${out}${SEP}${ctx_str}"
+fi
+
+if [ -n "$cache_str" ]; then
+  out="${out}${SEP}${cache_str}"
 fi
 
 if [ -n "$daily_str" ]; then
