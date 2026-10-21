@@ -46,7 +46,7 @@ This is a contract, not a guideline:
 ### 1. Scan
 
 ```bash
-python3 ~/.claude/skills/disk-cleanup/scripts/scan.py --json > "${TMPDIR:-/tmp}/disk-scan.json"
+python3 "${CLAUDE_SKILL_DIR}/scripts/scan.py" --json > "${TMPDIR:-/tmp}/disk-scan.json"
 ```
 
 Roots come from `choose_roots()` filtering `df -h`, not a hardcoded list — on a
@@ -63,7 +63,7 @@ forces a fresh walk.
 ### 2. Classify and present
 
 ```bash
-python3 ~/.claude/skills/disk-cleanup/scripts/classify.py "${TMPDIR:-/tmp}/disk-scan.json"
+python3 "${CLAUDE_SKILL_DIR}/scripts/classify.py" "${TMPDIR:-/tmp}/disk-scan.json"
 ```
 
 One command produces the whole report — not a manual join. It opens with a `scanned:`

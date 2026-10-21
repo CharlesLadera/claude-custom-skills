@@ -140,6 +140,34 @@ See [`statusline/README.md`](./statusline/README.md) for setup instructions.
 
 ## Installation
 
+Two ways in. Use the plugin marketplace to take a few skills and update them through Claude Code. Use symlinks to hack on the skills themselves.
+
+### As plugins
+
+```bash
+claude plugin marketplace add CharlesLadera/claude-custom-skills
+claude plugin install disk-cleanup@claude-custom-skills
+```
+
+Or in one step inside a session (Claude Code 2.1.275+):
+
+```
+/plugin install dev-workflow --marketplace CharlesLadera/claude-custom-skills
+```
+
+| Plugin | Skills |
+|---|---|
+| `context-audit` | `context-audit` |
+| `disk-cleanup` | `disk-cleanup` |
+| `gmail-organize` | `gmail-organize` |
+| `dev-workflow` | `start-of-day`, `end-of-day`, `log-session`, `save-conversation`, `daily-report`, `start-ticket`, `resume-ticket`, `finish-ticket`, `ticket-status` |
+| `transcribe-video` | `transcribe-video` |
+| `gov-job-finder` | `gov-job-finder` |
+
+`dev-workflow` is one plugin because its skills share the `docs/custom-agents/` folder and the **Context home** rule in `start-ticket`. Plugin skills are namespaced (`/disk-cleanup:disk-cleanup`). The bare name works too, unless something else already uses it. Don't install a skill both as a plugin and as a symlink — you'd get two copies under the same bare name. The statusline isn't a plugin; see [Statusline](#statusline).
+
+### As symlinks
+
 On a new machine, clone this repo and **symlink** each skill into `~/.claude/skills/`:
 
 ```bash
@@ -163,7 +191,7 @@ To take just one skill, link only that directory:
 ln -sfn ~/claude-custom-skills/disk-cleanup ~/.claude/skills/disk-cleanup
 ```
 
-The journaling trio (`start-of-day`, `end-of-day`, `log-session`) and the ticket family (`start-ticket`, `resume-ticket`, `finish-ticket`, `ticket-status`) each read files the others write — take a family whole. Every other skill stands alone.
+The skills in `dev-workflow` — the journaling trio, the ticket family, `save-conversation` and `daily-report` — read files the others write and follow `start-ticket`'s **Context home** rule, so link them together. `context-audit`, `disk-cleanup`, `gmail-organize`, `transcribe-video` and `gov-job-finder` stand alone.
 
 ### Requirements
 
@@ -241,6 +269,7 @@ Every skill looks for this file in the **main checkout** first, then the current
 claude-custom-skills/
 ├── README.md
 ├── LICENSE               # MIT
+├── .claude-plugin/       # marketplace.json: the skills as installable plugins
 ├── start-of-day/         # session journaling skills
 ├── end-of-day/
 ├── log-session/

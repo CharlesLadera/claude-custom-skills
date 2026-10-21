@@ -55,7 +55,7 @@ Everything past this point is the full audit. It is for when the user asks about
 ### 1. Measure
 
 ```bash
-AUDIT=~/.claude/skills/context-audit/scripts/audit.py
+AUDIT="${CLAUDE_SKILL_DIR}/scripts/audit.py"
 python3 $AUDIT              # full, ~25s (probes MCP health)
 python3 $AUDIT --skip-mcp   # plugins only, ~3s
 python3 $AUDIT --json       # machine-readable

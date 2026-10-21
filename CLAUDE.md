@@ -40,6 +40,8 @@ Change an owner and check its siblings in the same pass. A sibling that restates
 
 Directories stay flat: `~/.claude/skills/` is a flat namespace, so a directory name is exactly the name it installs under. Don't nest skills into bundle folders — it breaks existing symlinks for no gain.
 
+`.claude-plugin/marketplace.json` publishes the same directories as plugins without moving them. A skill that runs its own scripts must reach them through `${CLAUDE_SKILL_DIR}`, never `~/.claude/skills/<name>/` — a plugin install doesn't live there. Adding a skill means adding it to the marketplace too. Check with `claude plugin validate .`, then a real install: the validator never opens a plugin-root `SKILL.md`.
+
 `statusline/` is a config artifact, not a skill. `docs/` is gitignored and lives only on this machine — this repo runs the Context home rule's local mode, so journaling skills write there and commit nothing. Never `git add -f` anything under it. `docs/custom-agents/` holds this repo's own session journals. `docs/superpowers/` holds the design spec, implementation plan, and decision record behind `disk-cleanup` — the decision record lists every ruling made while building it, with what each costs if wrong.
 
 ## Git

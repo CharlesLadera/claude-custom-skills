@@ -1,0 +1,63 @@
+{
+  "name": "claude-custom-skills",
+  "owner": {
+    "name": "Charles Ladera",
+    "url": "https://github.com/CharlesLadera"
+  },
+  "description": "Claude Code skills: plugin token-cost audit, approval-gated disk cleanup and Gmail organization, and a session-journal + worktree-per-ticket workflow.",
+  "plugins": [
+    {
+      "name": "context-audit",
+      "source": "./context-audit",
+      "description": "Rank enabled plugins and MCP servers by always-on token cost against real usage, then apply the cut list.",
+      "category": "productivity",
+      "tags": ["tokens", "context", "plugins", "mcp"]
+    },
+    {
+      "name": "disk-cleanup",
+      "source": "./disk-cleanup",
+      "description": "Scan every readable volume, rank storage biggest-first, and remove only what you approve by name. The scanner cannot delete.",
+      "category": "productivity",
+      "tags": ["disk", "storage", "cleanup", "macos"]
+    },
+    {
+      "name": "gmail-organize",
+      "source": "./gmail-organize",
+      "description": "Migrate a Gmail mailbox to one label convention, sort the backlog and install filters through the gws CLI, one approved batch at a time, with undo.",
+      "category": "productivity",
+      "tags": ["gmail", "email", "labels", "gws"]
+    },
+    {
+      "name": "dev-workflow",
+      "source": ".",
+      "skills": [
+        "./start-of-day",
+        "./end-of-day",
+        "./log-session",
+        "./save-conversation",
+        "./daily-report",
+        "./start-ticket",
+        "./resume-ticket",
+        "./finish-ticket",
+        "./ticket-status"
+      ],
+      "description": "Per-branch session journals, conversation capture, standup reports, and a worktree-per-ticket lifecycle that share one docs/custom-agents/ folder.",
+      "category": "development",
+      "tags": ["journal", "worktree", "tickets", "standup"]
+    },
+    {
+      "name": "transcribe-video",
+      "source": "./transcribe-video",
+      "description": "Transcribe or caption a video or audio file with the local OpenAI Whisper CLI.",
+      "category": "productivity",
+      "tags": ["whisper", "transcription", "subtitles"]
+    },
+    {
+      "name": "gov-job-finder",
+      "source": "./gov-job-finder",
+      "description": "Find open Philippine government vacancies in a region, filtered to tech and any-degree roles.",
+      "category": "productivity",
+      "tags": ["jobs", "philippines"]
+    }
+  ]
+}
