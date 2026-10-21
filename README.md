@@ -166,6 +166,8 @@ Or in one step inside a session (Claude Code 2.1.275+):
 
 `dev-workflow` is one plugin because its skills share the `docs/custom-agents/` folder and the **Context home** rule in `start-ticket`. Plugin skills are namespaced (`/disk-cleanup:disk-cleanup`). The bare name works too, unless something else already uses it. Don't install a skill both as a plugin and as a symlink — you'd get two copies under the same bare name. The statusline isn't a plugin; see [Statusline](#statusline).
 
+Plugins follow tagged releases, not every commit to `main`. Each plugin carries the release's version number, so `claude plugin update <name>@claude-custom-skills` changes nothing until the next release. Auto-update is off by default for marketplaces outside Anthropic's own. Turn it on under `/plugin` → Marketplaces → `claude-custom-skills` → **Enable auto-update**.
+
 ### As symlinks
 
 On a new machine, clone this repo and **symlink** each skill into `~/.claude/skills/`:
