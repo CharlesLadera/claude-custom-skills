@@ -2,13 +2,18 @@
 
 Personal Claude Code skill library. Each top-level directory containing a `SKILL.md` is one skill.
 
-## Editing here edits a live tool
+## This is the public copy, not the live one
 
-Every skill directory is symlinked from `~/.claude/skills/<name>`. There is no install step — a save takes effect immediately, in this session and every other.
+The skills that actually run come from a separate private repo: `~/.claude/skills/<name>` links there, not here. Editing this repo changes no session's behavior, and the branch checked out here doesn't matter to anything live. The private repo also holds work-specific skills and journals that must never land here.
 
-A live skill also follows whichever branch this repo has checked out. Developing a skill on a feature branch changes that skill's behavior everywhere until it merges, and switching back to `main` silently reverts it. Merge before relying on a change.
+The two repos have separate histories. Changes cross as patches (`git diff` → `git apply`), never as commits, merges or cherry-picks:
 
-When re-linking a skill that already exists in `~/.claude/skills/`, diff both ways first — never assume the repo is the newer side.
+- **Private → public:** scan the patch for names, ticket IDs, company or client names, locations and machine paths before pushing. The private copies of shared skills keep machine details, such as `disk-cleanup`'s measured volume roots, that the public copies replace with generic wording. Keep those differences.
+- **Public → private:** port the same way, then run that repo's test suites.
+
+Fix a shared skill in both repos, or say which one you left out.
+
+To try a change here live, load it for one run with `claude --plugin-dir <skill-dir>` instead of relinking `~/.claude/skills`.
 
 ## Most of these are behavior specs, not code
 
