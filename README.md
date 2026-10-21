@@ -1,6 +1,18 @@
 # claude-custom-skills
 
-A personal library of custom [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skills and configuration, kept in one repo so any machine can be set up by cloning it and linking the skills into place.
+A personal library of custom [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skills and configuration, kept in one repo so any machine can be set up by cloning it and linking the skills into place. MIT licensed — take one skill or all of them.
+
+## Highlights
+
+If you only look at three, look at these. Each ships real code with tests, and each is built so the tool cannot change anything you didn't approve.
+
+| Skill | What it does | Why it's different |
+|---|---|---|
+| [`context-audit`](#environment-upkeep) | Ranks every enabled plugin and MCP server by always-on token cost against how much you actually use it, then applies the cut list | Took one machine's per-request baseline from 51,590 to 6,495 tokens. Tells "unused here but busy in another repo" apart from "dead everywhere", so a cut never breaks another project |
+| [`disk-cleanup`](#disk-cleanup) | Scans every readable volume and ranks directories, large files and apps biggest-first in one table | The scanner is structurally unable to delete: a safety test fails the 287-test suite if a delete or move call ever appears in its scripts. Removal happens only after you approve each item by name |
+| [`gmail-organize`](#email) | Migrates a mailbox to one label convention, sorts the backlog and installs filters | One file can write, its write allowlist is pinned by tests (112 in the suite), every batch is validated before its first write, and `--undo-last` reverses it. Nothing is ever permanently deleted |
+
+Everything else here is a `SKILL.md` of instructions with no code and no test suite. They are checked by re-reading them against their sibling skills, not by running anything — treat them as well-specified workflows, not verified software.
 
 ## What's inside
 
@@ -145,6 +157,25 @@ for skill_md in ~/claude-custom-skills/*/SKILL.md; do
 done
 ```
 
+To take just one skill, link only that directory:
+
+```bash
+ln -sfn ~/claude-custom-skills/disk-cleanup ~/.claude/skills/disk-cleanup
+```
+
+The journaling trio (`start-of-day`, `end-of-day`, `log-session`) and the ticket family (`start-ticket`, `resume-ticket`, `finish-ticket`, `ticket-status`) each read files the others write — take a family whole. Every other skill stands alone.
+
+### Requirements
+
+| Skill | Needs on `PATH` |
+|---|---|
+| `context-audit` | `python3`, the `claude` CLI |
+| `disk-cleanup` | `python3`. macOS is the vetted target; Linux and Windows get small, conservative starter manifests |
+| `gmail-organize` | `python3`, `gws` (`npm install -g @googleworkspace/cli`, then `gws auth login`) |
+| `end-of-day`, `start-of-day`, ticket family | `git`, [`gh`](https://cli.github.com/) for PR status |
+| `transcribe-video` | `whisper` (`pip install openai-whisper`), `ffmpeg` |
+| `daily-report` | an MCP for your PM tool (Jira, Linear, Monday.com, …), optionally Gmail |
+
 Links, not copies, for two reasons. A skill directory can hold more than `SKILL.md` — `context-audit/` ships `scripts/audit.py`, which its own instructions invoke by path, so a `SKILL.md`-only copy installs a broken skill. And copies drift silently in *both* directions: the repo goes stale on one side while a hand-edit on the other exists nowhere else. Linking makes the repo the single source of truth and the drift structurally impossible. The loop refuses to touch a path that is already a real directory — diff that copy against the repo before replacing it, in both directions.
 
 Skills in `~/.claude/skills/` hot-reload; no restart is needed. Type `/start-of-day`, or just describe the task and Claude picks the matching skill.
@@ -209,6 +240,7 @@ Every skill looks for this file in the **main checkout** first, then the current
 ```
 claude-custom-skills/
 ├── README.md
+├── LICENSE               # MIT
 ├── start-of-day/         # session journaling skills
 ├── end-of-day/
 ├── log-session/

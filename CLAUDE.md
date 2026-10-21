@@ -45,3 +45,5 @@ Directories stay flat: `~/.claude/skills/` is a flat namespace, so a directory n
 ## Git
 
 Push requires the `CharlesLadera` GitHub account. The wrong account fails as "Repository not found", not as an auth error.
+
+`main` is protected, admins included: every change lands through a PR, the `GitGuardian Security Checks` status must pass, and force-push and deletion are blocked. CodeRabbit reviews but is deliberately not a required check — its free tier allows one review per hour, and a required check that can't run blocks every merge.
