@@ -42,7 +42,7 @@ This is a contract, not a guideline:
 
 | Name | Value |
 |---|---|
-| `SKILL_DIR` | this skill's directory (`~/.claude/skills/gmail-organize`, resolved) |
+| `SKILL_DIR` | `${CLAUDE_SKILL_DIR}` — this skill's directory, wherever it is installed (a `~/.claude/skills` link or a plugin) |
 | `PY` | first of `python3`, `python` for which `<cmd> -c 'import sys'` succeeds — on Windows `python3` is often a Store stub that fails |
 | `STATE` | `~/.config/gmail-organize/<MAILBOX>.json` |
 | `OUT` | `<scratchpad>/gmail-organize-<YYYYMMDD-HHMM>` |
