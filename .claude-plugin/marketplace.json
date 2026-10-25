@@ -9,7 +9,7 @@
     {
       "name": "context-audit",
       "source": "./context-audit",
-      "version": "1.1.1",
+      "version": "1.2.0",
       "description": "Rank enabled plugins and MCP servers by always-on token cost against real usage, then apply the cut list.",
       "category": "productivity",
       "tags": ["tokens", "context", "plugins", "mcp"]
@@ -17,7 +17,7 @@
     {
       "name": "disk-cleanup",
       "source": "./disk-cleanup",
-      "version": "1.1.1",
+      "version": "1.2.0",
       "description": "Scan every readable volume, rank storage biggest-first, and remove only what you approve by name. The scanner cannot delete.",
       "category": "productivity",
       "tags": ["disk", "storage", "cleanup", "macos"]
@@ -25,7 +25,7 @@
     {
       "name": "gmail-organize",
       "source": "./gmail-organize",
-      "version": "1.1.1",
+      "version": "1.2.0",
       "description": "Migrate a Gmail mailbox to one label convention, sort the backlog and install filters through the gws CLI, one approved batch at a time, with undo.",
       "category": "productivity",
       "tags": ["gmail", "email", "labels", "gws"]
@@ -33,7 +33,7 @@
     {
       "name": "dev-workflow",
       "source": ".",
-      "version": "1.1.1",
+      "version": "1.2.0",
       "skills": [
         "./start-of-day",
         "./end-of-day",
@@ -52,7 +52,7 @@
     {
       "name": "transcribe-video",
       "source": "./transcribe-video",
-      "version": "1.1.1",
+      "version": "1.2.0",
       "description": "Transcribe or caption a video or audio file with the local OpenAI Whisper CLI.",
       "category": "productivity",
       "tags": ["whisper", "transcription", "subtitles"]
@@ -60,7 +60,7 @@
     {
       "name": "gov-job-finder",
       "source": "./gov-job-finder",
-      "version": "1.1.1",
+      "version": "1.2.0",
       "description": "Find open Philippine government vacancies in a region, filtered to tech and any-degree roles.",
       "category": "productivity",
       "tags": ["jobs", "philippines"]
