@@ -66,9 +66,10 @@ A lifecycle for working multiple tickets in parallel, each in its own git worktr
 | [`start-ticket`](./start-ticket/SKILL.md) | main checkout | Provision a worktree on a fresh branch, scaffold the ticket task file, set the tracker to In Progress |
 | [`resume-ticket`](./resume-ticket/SKILL.md) | the worktree | Re-read the ticket file, recap done-vs-pending, launch the dev server |
 | [`finish-ticket`](./finish-ticket/SKILL.md) | the worktree | Build, review, open a PR to the base branch, optionally integrate into a test-bed branch, close out |
-| [`ticket-status`](./ticket-status/SKILL.md) | anywhere | Dashboard of all worktrees — ticket, branch, PR, integration status, dev server |
+| [`ticket-status`](./ticket-status/SKILL.md) | anywhere | Dashboard of all worktrees — ticket, branch, PR, integration status, dev server, integration drift |
+| [`rebuild-integration`](./rebuild-integration/SKILL.md) | anywhere | Reset the integration branch to the base and re-merge the open ticket branches when it has drifted |
 
-The flow: `start-ticket` → work in the worktree (with `resume-ticket` to re-enter after a break) → `finish-ticket` → repeat. `ticket-status` gives an at-a-glance view of everything in flight.
+The flow: `start-ticket` → work in the worktree (with `resume-ticket` to re-enter after a break) → `finish-ticket` → repeat. `ticket-status` gives an at-a-glance view of everything in flight, and says when the integration branch needs a `rebuild-integration`.
 
 ### Environment upkeep
 
@@ -160,7 +161,7 @@ Or in one step inside a session (Claude Code 2.1.275+):
 | `context-audit` | `context-audit` |
 | `disk-cleanup` | `disk-cleanup` |
 | `gmail-organize` | `gmail-organize` |
-| `dev-workflow` | `start-of-day`, `end-of-day`, `side-note`, `save-conversation`, `daily-report`, `start-ticket`, `resume-ticket`, `finish-ticket`, `ticket-status` |
+| `dev-workflow` | `start-of-day`, `end-of-day`, `side-note`, `save-conversation`, `daily-report`, `start-ticket`, `resume-ticket`, `finish-ticket`, `ticket-status`, `rebuild-integration` |
 | `transcribe-video` | `transcribe-video` |
 | `gov-job-finder` | `gov-job-finder` |
 
@@ -245,6 +246,7 @@ The ticket-workflow skills work in any repo. They detect sensible defaults and a
   "contextBranch": null,
   "contextRemote": "origin",
   "tracker": "linear",
+  "reviewSkills": [],
   "branchPrefix": "",
   "taskFilesDir": "docs/custom-agents/tasks",
   "project": "web",
@@ -257,10 +259,11 @@ Every skill looks for this file in the **main checkout** first, then the current
 
 - **worktreeDir** — where worktrees are created (must be gitignored).
 - **baseBranch** — the PR target (e.g. `main`, `staging`, `develop`).
-- **integrationBranch** — optional personal test-bed branch that all in-flight work is merged into for combined testing; leave `null` to disable that step.
+- **integrationBranch** — optional personal test-bed branch that all in-flight work is merged into for combined testing; leave `null` to disable that step. It is disposable: never branch from it or commit to it directly, and `rebuild-integration` resets it when it drifts. With `contextBranch` set it must be a different branch and lives in its own worktree, `<worktreeDir>/<integrationBranch>`.
 - **contextBranch** / **contextRemote** — optional. When set (e.g. `"dev-yourname"`), all of `docs/custom-agents/` — journals, conversations, task files, standups, this config — lives only on that branch, in the main checkout. Every skill writes there and commits + pushes straight to it (explicit paths, `add -f`, no PR); nothing under `docs/custom-agents/` goes to the base branch or a feature branch. The main checkout must stay on this branch; the skills stop rather than switch it. Leave `null` for the default per-checkout behavior.
   - **Local mode** — leave `contextBranch` `null` and gitignore `docs/custom-agents/` (or a parent like `docs/`). The folder then lives only in the main checkout and is never committed, pushed or PR'd. Use it for a public repo whose journals must stay private. There is no backup, so back the folder up yourself.
-- **tracker** — `linear`, `github`, or `none`.
+- **tracker** — `linear`, `github`, `jira` (with `trackerSite` and `trackerProject`), or `none`.
+- **reviewSkills** — optional stack skills `finish-ticket` runs after `/code-review`, each only on the changed files it covers: `[{ "skill": "vercel-react-best-practices", "paths": ["web/**/*.tsx"] }]`. An entry can add `"imports": ["@tanstack/react-query"]` to match library code wherever it lives.
 - **branchPrefix** — optional namespace for branch names (e.g. `yourname/`).
 - **project** — the app/sub-project a ticket belongs to. It is a folder under `taskFilesDir`, so task files live at `<taskFilesDir>/<project>/<in-progress|complete>/<ticket-id>-<slug>.md`. Every ticket skill reads this key; leave it unset and each one guesses a different folder.
 - **devCommand** / **buildCommand** — for a monorepo these may be filter templates like `pnpm --filter <pkg> dev`.
@@ -280,6 +283,7 @@ claude-custom-skills/
 ├── resume-ticket/
 ├── finish-ticket/
 ├── ticket-status/
+├── rebuild-integration/
 ├── daily-report/         # standup prep from tickets + email
 ├── disk-cleanup/         # reclaimable-storage scan (+ scripts/, tests/)
 ├── gmail-organize/       # Gmail label convention via gws (+ scripts/, apply/, tests/)

@@ -19,7 +19,7 @@ git fetch origin 2>/dev/null
 git worktree list
 ```
 
-For each worktree under `worktreeDir` (skip the main checkout):
+For each worktree under `worktreeDir` (skip the main checkout, and the integration worktree `<worktreeDir>/<integrationBranch>`, which holds no ticket):
 1. **Ticket** — derive the ticket id from the branch name.
 2. **Dir** — the worktree directory basename.
 3. **Branch** — the checked-out branch.
@@ -38,6 +38,15 @@ One markdown table, one row per worktree:
 
 Below the table, call out anything actionable:
 - branches missing from the integration branch;
+- **integration drift** (if `integrationBranch` is set) — commits on it that neither the base branch nor any open ticket branch carries. They come from squash-merged, closed or rewritten branches, so the integration branch no longer matches what will ship:
+  ```bash
+  open_refs() {   # open PR branches that exist on origin; a function, since zsh won't word-split a variable
+    gh pr list --state open --author @me --json headRefName -q '.[].headRefName' |
+      while read -r b; do git rev-parse -q --verify "origin/$b" >/dev/null && echo "origin/$b"; done
+  }
+  git rev-list --no-merges --count origin/<integrationBranch> --not origin/<baseBranch> $(open_refs)
+  ```
+  Non-zero ⇒ say how many and point at `/rebuild-integration`. Exclude `docs/custom-agents/` commits from the count when the integration branch is also the context branch (the old dual-role layout), since those are meant to stay;
 - merged PRs whose worktrees can be removed (`git worktree remove ...`);
 - port collisions (two worktrees claiming the same app);
 - with `contextBranch` set or in local mode, any branch whose diff vs `origin/<baseBranch>` touches `docs/custom-agents/` — those files belong on `contextBranch` and would put the folder back on the base branch when the PR merges;

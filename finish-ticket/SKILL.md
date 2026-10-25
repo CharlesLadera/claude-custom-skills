@@ -11,13 +11,26 @@ Takes a completed ticket from "code done" to "PR open + integrated + closed out"
 ## Steps
 
 ### 0. Resolve project conventions
-Find and read the config the way **start-ticket** step 0 does (the main checkout's copy first — this worktree may not carry `docs/custom-agents/`): `baseBranch`, `branchFrom`, `integrationBranch`, `contextBranch`, `tracker`, `taskFilesDir`, `project`, plus a build command (`buildCommand`) if present. Detect anything missing. `project` is the folder under `taskFilesDir` holding this ticket's file — resolve it the same way **start-ticket** does. With `contextBranch` set or in local mode, apply start-ticket's **Context home** rule throughout: the task file lives under `$HUB/<taskFilesDir>`; with `contextBranch` its close-out commits to `contextBranch`, in local mode nothing is committed.
+Find and read the config the way **start-ticket** step 0 does (the main checkout's copy first — this worktree may not carry `docs/custom-agents/`): `baseBranch`, `branchFrom`, `integrationBranch`, `contextBranch`, `tracker`, `taskFilesDir`, `project`, `reviewSkills`, plus a build command (`buildCommand`) if present. Detect anything missing. `project` is the folder under `taskFilesDir` holding this ticket's file — resolve it the same way **start-ticket** does. With `contextBranch` set or in local mode, apply start-ticket's **Context home** rule throughout: the task file lives under `$HUB/<taskFilesDir>`; with `contextBranch` its close-out commits to `contextBranch`, in local mode nothing is committed.
 
 ### 1. Build
 Run the project's build for the affected scope (config `buildCommand`, else detect: `pnpm build` / `npm run build` / `cargo build` / etc.; in a monorepo, filter to the affected package). If the build fails, STOP and fix before continuing. Report failures with output — never claim success without the build passing.
 
 ### 2. Code review
-Review the branch diff before opening the PR — use a code-review skill if one is available (e.g. `superpowers:requesting-code-review`) or run the project's review command. Address findings, or consciously defer them with a note.
+Review the branch diff before opening the PR with `/code-review`, or with the project's own review command if it has one.
+
+Then run the stack review skills. For each `reviewSkills` entry (start-ticket step 0), list the changed files it covers, diffing against `<branchFrom>` if set, else `<baseBranch>`:
+```bash
+git diff --name-only origin/<branchFrom-or-baseBranch>...HEAD -- ':(glob)<path1>' ':(glob)<path2>'
+```
+If the entry has `imports`, keep only the files that contain one of them (add `--diff-filter=d` so deleted files drop out; with no `paths`, leave off the pathspecs):
+```bash
+git diff -z --name-only --diff-filter=d origin/<branchFrom-or-baseBranch>...HEAD -- ':(glob)<path1>' \
+  | xargs -0 grep -l -F -e '<import1>' -e '<import2>' --
+```
+Empty output ⇒ skip that skill. Otherwise load it and check only the changed lines in those files against its rules. Report a finding only where a changed line breaks a rule the skill states. A reviewer asked for gaps always finds some, and chasing rules the diff doesn't touch is how over-engineering starts.
+
+Address findings, or consciously defer them with a note.
 
 ### 3. Open the PR to the base branch
 Commit any remaining work first (only if the user asked to commit). With `contextBranch` set or in local mode, first make sure the branch carries no context files — `git diff --name-only origin/<baseBranch>...HEAD -- docs/custom-agents` must print nothing; if it lists files, stop and tell the user (they belong on `contextBranch`, and merging this PR would put the folder back on `<baseBranch>`). With `branchFrom` set (and different from `baseBranch`), also check that `git log --oneline origin/<branchFrom>..HEAD` lists only this ticket's commits. If it shows commits from `<baseBranch>`, someone merged the base in: stop and tell the user. The PR may show conflicts against `<baseBranch>`; never merge the base in to clear them. Then:
@@ -30,20 +43,21 @@ Tracker text often holds backticks or `$(…)`, which a double-quoted shell stri
 Capture the PR number.
 
 ### 4. Integrate into the personal test-bed branch (only if `integrationBranch` is set)
-From the main checkout (a branch lives in one worktree, so switch there):
+Pick where the merges run (a branch is checked out in one worktree only, so run them there):
+- **`contextBranch` set** → the integration worktree, `IW=$HUB/<worktreeDir>/<integrationBranch>`. Never the hub, which stays on `contextBranch`. If `IW` doesn't exist yet, create it from the remote branch, or from `origin/<baseBranch>` when there is none: `git -C "$HUB" worktree add "$IW" <integrationBranch>` (add `-b <integrationBranch> … origin/<baseBranch>` for a new one). If `integrationBranch` equals `contextBranch` (the old dual-role layout), stop and tell the user to split them (start-ticket's **integrationBranch** key): merging tickets into the context branch can't be undone by a rebuild.
+- **Otherwise** → the main checkout: `git -C "$HUB" checkout <integrationBranch>`, so `IW=$HUB`.
+
+Then:
 ```bash
-git checkout <integrationBranch>
-git merge origin/<baseBranch> --no-edit
+git -C "$IW" merge origin/<baseBranch> --no-edit
 ```
 Then scan all worktree branches and merge any whose tip is NOT yet an ancestor of the integration branch:
 ```bash
-git worktree list
-git merge-base --is-ancestor "$(git rev-parse <branch>)" <integrationBranch> && echo in || echo missing
-git merge <branch> --no-edit   # for each missing one
+git -C "$HUB" worktree list
+git -C "$IW" merge-base --is-ancestor "$(git -C "$HUB" rev-parse <branch>)" HEAD && echo in || echo missing
+git -C "$IW" merge <branch> --no-edit   # for each missing one
 ```
-Push (regular, never force, during routine wrap-up): `git push origin <integrationBranch>`. Print a table: **branch → PR# → in integration branch (✓/✗)**. If no integration branch is configured, skip this entire step.
-
-With `contextBranch` set, the main checkout must stay on `contextBranch`: skip the `git checkout` when `integrationBranch` equals `contextBranch` (run the merges with `git -C "$HUB" …`), and skip this step with a note when it names a different branch. Never switch the hub.
+Push (regular, never force, during routine wrap-up): `git -C "$IW" push origin <integrationBranch>`. A rejected push means the remote was rebuilt elsewhere: stop and report, never pull or force here. Print a table: **branch → PR# → in integration branch (✓/✗)**. If no integration branch is configured, skip this entire step. Resetting the integration branch is **rebuild-integration**'s job, never this step's.
 
 ### 5. Close out the task file + tracker
 `mv <taskFilesDir>/<project>/in-progress/<ticket-id>-*.md <taskFilesDir>/<project>/complete/` (under `$HUB` with `contextBranch` or in local mode — see below), then update the frontmatter and bump `synced_at:`.
@@ -58,7 +72,7 @@ Task files carry **two status axes**. Write both — `/start-of-day` reconciles 
 
 `ticket: in-review` + `pr:` are what let the next `/start-of-day` notice the PR merged, flip the file to `ticket: merged`, and offer the worktree cleanup this skill defers in step 7. Omit either one and that reconciliation silently never fires.
 
-If a tracker is configured, set its status to match — **Done**, or **In Review** if the PR is open and someone else will merge it.
+If a tracker is configured, set its status to match — **Done**, or **In Review** if the PR is open and someone else will merge it. In Jira, pick the matching transition by name from the issue's transitions.
 
 **With `contextBranch` set**, do the move and frontmatter edits in `$HUB/<taskFilesDir>` (not this worktree), then commit both paths to `contextBranch` per start-ticket's **Context home** rule and push:
 ```bash
@@ -95,4 +109,4 @@ git worktree remove <worktreeDir>/<slug>
 If the PR isn't merged yet, just note it for later cleanup.
 
 ### 8. Report
-Summarize: build status, PR# + URL, integration table (if applicable), task file moved (and, with `contextBranch`, the commit on it; in local mode, "local only, not committed"), artifacts fanned out, cleanup state.
+Summarize: build status, review (which review skills ran, which were skipped for no matching path, findings fixed or deferred), PR# + URL, integration table (if applicable), task file moved (and, with `contextBranch`, the commit on it; in local mode, "local only, not committed"), artifacts fanned out, cleanup state.
