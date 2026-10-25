@@ -42,12 +42,12 @@ Skills for keeping a continuous work journal so context survives between session
 |---|---|
 | [`start-of-day`](./start-of-day/SKILL.md) | Restore context from previous sessions at the start of a work session |
 | [`end-of-day`](./end-of-day/SKILL.md) | Wrap up a session — captures accomplishments, pending items, and next plans |
-| [`log-session`](./log-session/SKILL.md) | Lightweight mid-session capture for planning/research side tasks — appends to the same per-session journal |
+| [`side-note`](./side-note/SKILL.md) | Quick side note (research, a decision, a side task) appended to a session journal and landed on `main` the same way `end-of-day` lands its entry |
 | [`daily-report`](./daily-report/SKILL.md) | Prepare for a daily standup: summarize recent ticket and email activity into a standup document |
 
-A typical day: `start-of-day` to pick up where you left off → work → `log-session` for any notable side tasks → `end-of-day` to close out.
+A typical day: `start-of-day` to pick up where you left off → work → `side-note` for any notable side tasks → `end-of-day` to close out.
 
-`start-of-day`, `log-session`, and `end-of-day` all read and write the same per-session journal, `docs/custom-agents/memory/sessions/<slug>.md`, keyed to a slug derived from the git branch. Parallel branches get parallel journals instead of colliding in one dated file. `end-of-day` owns that format; the other two follow it.
+`start-of-day`, `side-note`, and `end-of-day` all read and write the same per-session journal, `docs/custom-agents/memory/sessions/<slug>.md`, keyed to a slug derived from the git branch. Parallel branches get parallel journals instead of colliding in one dated file. `end-of-day` owns that format; the other two follow it.
 
 ### Conversation capture
 
@@ -160,7 +160,7 @@ Or in one step inside a session (Claude Code 2.1.275+):
 | `context-audit` | `context-audit` |
 | `disk-cleanup` | `disk-cleanup` |
 | `gmail-organize` | `gmail-organize` |
-| `dev-workflow` | `start-of-day`, `end-of-day`, `log-session`, `save-conversation`, `daily-report`, `start-ticket`, `resume-ticket`, `finish-ticket`, `ticket-status` |
+| `dev-workflow` | `start-of-day`, `end-of-day`, `side-note`, `save-conversation`, `daily-report`, `start-ticket`, `resume-ticket`, `finish-ticket`, `ticket-status` |
 | `transcribe-video` | `transcribe-video` |
 | `gov-job-finder` | `gov-job-finder` |
 
@@ -226,7 +226,7 @@ That is the entire update — the links already point here. Re-run the install l
 
 The skills use a consistent layout under `docs/custom-agents/` inside whatever project you're working in:
 
-- `docs/custom-agents/memory/` — work journals (`start-of-day`, `end-of-day`, `log-session`)
+- `docs/custom-agents/memory/` — work journals (`start-of-day`, `end-of-day`, `side-note`)
 - `docs/custom-agents/conversations/` — saved conversations (`save-conversation`)
 - `docs/custom-agents/tasks/` — ticket task files (the ticket-workflow skills)
 - `docs/custom-agents/standups/` — standup documents (`daily-report`)
@@ -274,7 +274,7 @@ claude-custom-skills/
 ├── .claude-plugin/       # marketplace.json: the skills as installable plugins
 ├── start-of-day/         # session journaling skills
 ├── end-of-day/
-├── log-session/
+├── side-note/
 ├── save-conversation/
 ├── start-ticket/         # ticket-workflow skills
 ├── resume-ticket/

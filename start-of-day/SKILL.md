@@ -93,7 +93,7 @@ For the chosen `<slug>`, Read `sessions/<slug>.md` and present its **latest** da
 > 📝 **Notes to remember:**
 > [Notes bullets]
 
-Skip any section the entry doesn't have — a day whose only entries came from `/log-session` has `#### + Side session [time]` blocks instead of the four ✅/🔄/🎯/📝 sections. Show those verbatim under a **Side sessions** heading.
+Skip any section the entry doesn't have — a day whose only entries came from `/side-note` has `#### + Side session [time]` blocks instead of the four ✅/🔄/🎯/📝 sections. Show those verbatim under a **Side sessions** heading.
 
 Then ask: "Ready to pick up here, or has anything changed?"
 

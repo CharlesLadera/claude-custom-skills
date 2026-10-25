@@ -37,7 +37,7 @@
       "skills": [
         "./start-of-day",
         "./end-of-day",
-        "./log-session",
+        "./side-note",
         "./save-conversation",
         "./daily-report",
         "./start-ticket",
