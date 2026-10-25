@@ -39,10 +39,11 @@ For any key not in the config, detect or ask:
 - **worktreeDir** — use an existing `.worktrees/` or `.claude/worktrees/`; else default `.worktrees/`. Ensure it's gitignored (`git check-ignore`); if not, add + commit the ignore entry.
 - **baseBranch** — the PR target. Detect: prefer `origin/staging`, else `origin/develop`, else the repo default (`git symbolic-ref refs/remotes/origin/HEAD`). Confirm if ambiguous.
 - **branchFrom** — OPTIONAL. The branch new ticket branches are cut from, when that differs from the PR target. Example: PRs go to `qa`, but `qa` holds unreleased work, so branches are cut from `master` to keep that work out of the PR. Unset ⇒ `baseBranch`. When it differs from `baseBranch`, **never merge `baseBranch` into the ticket branch**, not even to fix PR conflicts; ask the user how the team resolves those.
-- **integrationBranch** — OPTIONAL personal test-bed branch that all in-flight work is merged into for combined testing. If unset, skip every integration-branch step.
-- **tracker** — `linear` (MCP), `github` (`gh issue view`), or `none` (user provides title/branch).
+- **integrationBranch** — OPTIONAL personal test-bed branch that all in-flight work is merged into for combined testing. If unset, skip every integration-branch step. It is disposable: **rebuild-integration** resets it to the base branch and re-merges the open ticket branches, so nothing may live only there. Never cut a ticket branch from it and never commit to it directly. With `contextBranch` set it must be a different branch, since the context branch is never rebuilt, and it lives in its own worktree, `<worktreeDir>/<integrationBranch>`, created on first use; the hub stays on `contextBranch`.
+- **tracker** — `linear` (MCP), `github` (`gh issue view`), `jira` (Atlassian plugin MCP; also set `trackerSite`, e.g. `acme.atlassian.net`, and `trackerProject`, e.g. `PROJ`), or `none` (user provides title/branch). If the tracker's tools are not loaded in this session, say so and name the plugin or server to enable. Don't fall back to `none` silently.
 - **branchPrefix** — optional namespace prepended to branch names (e.g. `yourname/`).
 - **taskFilesDir** — where ticket markdown lives; default `docs/custom-agents/tasks`.
+- **reviewSkills** — OPTIONAL. Stack best-practice skills that **finish-ticket** step 2 runs after `/code-review`, each scoped to the files it covers: `[{ "skill": "<skill name>", "paths": ["<glob>", …], "imports": ["<string>", …] }]`, e.g. `{ "skill": "vercel-react-best-practices", "paths": ["web/**/*.tsx", "web/**/*.ts"] }`. Globs use git's `:(glob)` pathspec syntax, so `**` spans directories. `imports` is optional and narrows the match to files that contain one of the strings (e.g. `"@tanstack/react-query"`), for library code that can live in any file; pair it with code-file `paths`, or docs that mention the library match too. A skill runs only when a changed file matches. Unset ⇒ `/code-review` alone. Never invent entries: the user chooses which skills review their stack.
 - **project** — the app/sub-project this ticket belongs to. It is a folder under `taskFilesDir`, so every task-file path is `<taskFilesDir>/<project>/<status-folder>/<ticket-id>-<slug>.md`. Resolve: config, else the monorepo package the ticket touches, else the repo name. Ask once when ambiguous, and pin it in the config. **Every ticket skill reads this same key** — if it is missing they will each guess differently and lose track of the file.
 
 - **contextBranch** — OPTIONAL. Set it (e.g. `"dev-yourname"`) when `docs/custom-agents/` must live **only** on that branch, in the main checkout, and never on the base branch or a feature branch. Unset ⇒ everything below behaves exactly as before, unless the folder is gitignored (local mode, below). **contextRemote** is the remote it pushes to (default `origin`).
@@ -85,6 +86,7 @@ If in a worktree, STOP and tell the user to run from the main checkout.
 ### 2. Get the ticket
 - **linear** → fetch via Linear MCP by identifier; capture title, `gitBranchName`, and any app/component label; lift description + acceptance criteria.
 - **github** → `gh issue view <number> --json title,body,labels,url`.
+- **jira** → `getJiraIssue` with the key (e.g. `PROJ-123`) on `trackerSite`; capture summary, components or labels; lift description + acceptance criteria.
 - **none** → ask the user for the title and a short slug.
 
 Derive the branch name: use the tracker's suggested branch name if present, else `<branchPrefix><ticket-id>-<kebab-title>`. Derive a short worktree **dir** slug `<ticket-id>-<2-4 keywords>` and **ask the user to confirm or edit** it before creating anything.
@@ -142,7 +144,7 @@ Body: lift the tracker description + acceptance criteria, add scope notes / tech
 **With `contextBranch` set**, the task file goes under `$HUB/<taskFilesDir>/…` (never into the new worktree), and is committed and pushed to `contextBranch` right away per **Context home** — `git -C "$HUB" add -f -A -- <taskFilesDir>/<project>/in-progress/<ticket-id>-<slug>.md`, commit those paths only with `docs(task): <ticket-id> start`, push. Enriching an existing stub is the same commit. In local mode, write it under `$HUB/<taskFilesDir>/…` the same way and commit nothing. Otherwise, leave it as today.
 
 ### 7. Update the tracker
-If `tracker` is `linear` or `github`, set the ticket's status to In Progress (Linear MCP, or `gh issue edit`/project status).
+If `tracker` is set (not `none`), set the ticket's status to In Progress: Linear MCP; `gh issue edit`/project status; or `transitionJiraIssue` to the project's In Progress transition (list the transitions first, since names vary per workflow).
 
 ### 8. Report
 Print: worktree path, branch (and the branch it was cut from: `branchFrom` or the base branch), ticket file path (and, with `contextBranch`, the commit that landed it there; in local mode, "local only, not committed"), and the next step — "Open a terminal in the worktree, run `claude`, then use **resume-ticket** for this ticket." Do NOT start a dev server here; if an integration branch / shared backend dev process runs from the main checkout, leave the main checkout free for it.

@@ -43,7 +43,8 @@
         "./start-ticket",
         "./resume-ticket",
         "./finish-ticket",
-        "./ticket-status"
+        "./ticket-status",
+        "./rebuild-integration"
       ],
       "description": "Per-branch session journals, conversation capture, standup reports, and a worktree-per-ticket lifecycle that share one docs/custom-agents/ folder.",
       "category": "development",

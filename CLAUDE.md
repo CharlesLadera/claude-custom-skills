@@ -36,7 +36,7 @@ Where a skill embeds a shell snippet, run it against a scratch directory before 
 Where several skills read and write the same file, exactly one owns the format and the rest reference it by name:
 
 - `end-of-day` owns the session journal (`docs/custom-agents/memory/sessions/<slug>.md`) — its frontmatter and slug rules. `start-of-day` and `side-note` follow it. Its `🗣 For the daily report` and `🎯 Next Session Plan` sections exist for a later session that aggregates every journal into one report.
-- `start-ticket` owns the ticket-workflow config keys and the task-file layout. `resume-ticket`, `finish-ticket`, and `ticket-status` follow it.
+- `start-ticket` owns the ticket-workflow config keys and the task-file layout. `resume-ticket`, `finish-ticket`, `ticket-status` and `rebuild-integration` follow it. Its **integrationBranch** key owns the integration-branch rules: disposable, never a ticket base, a separate worktree when `contextBranch` is set.
 - `start-ticket` also owns the **Context home** rule (`contextBranch` and local mode: config discovery from the main checkout first, where `docs/custom-agents/` lives, how it is committed or why it never is). Every skill that touches that folder — the ticket family, the journaling trio, `save-conversation`, `daily-report` — applies it by reference.
 
 Change an owner and check its siblings in the same pass. A sibling that restates a format instead of pointing at its owner is how the two drift apart — that drift was the cause of every broken cross-skill contract found in the 2026-09-17 audit.
