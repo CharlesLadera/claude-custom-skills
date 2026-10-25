@@ -50,7 +50,7 @@ For any key not in the config, detect or ask:
 If the config file was absent, offer to write it with the resolved values so future runs are zero-friction.
 
 #### Context home (`contextBranch`, local mode) — the rule every skill that touches `docs/custom-agents/` follows
-This skill owns the rule; `resume-ticket`, `finish-ticket`, `ticket-status`, `end-of-day`, `log-session`, `start-of-day`, `save-conversation` and `daily-report` apply it by reference, as does any skill that reads journals.
+This skill owns the rule; `resume-ticket`, `finish-ticket`, `ticket-status`, `end-of-day`, `side-note`, `start-of-day`, `save-conversation` and `daily-report` apply it by reference, as does any skill that reads journals.
 
 - **Unset, folder not gitignored** → `CA` is the current checkout's `docs/custom-agents/` — today's behavior, nothing else changes.
 - **Unset, folder gitignored** → **local mode**: the folder is private to this machine and never reaches git. Detect it from the patterns alone (`--no-index`, so a folder that is still tracked mid-migration counts too):
