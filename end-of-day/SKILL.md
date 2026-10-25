@@ -90,7 +90,8 @@ echo "== branch=${BRANCH:-DETACHED} default=$BASE_BRANCH slug=${SLUG:-ASK}"
 echo "== this session's commits"
 if [ -n "$BASE" ]; then git log --oneline "$BASE"..HEAD
 else                                                # no range: since last_updated, or 7 days
-  SINCE="7 days ago"; [ -n "$SLUG" ] && [ -f "$J" ] && SINCE=$(sed -n 's/^last_updated: *//p' "$J" | head -1)
+  SINCE="7 days ago"; LU=""; [ -n "$SLUG" ] && [ -f "$J" ] && LU=$(sed -n 's/^last_updated: *//p' "$J" | head -1)
+  [ -n "$LU" ] && SINCE="$LU 00:00"                 # a bare date means that day at the CURRENT time
   git log --oneline --since="$SINCE" HEAD
 fi
 echo "== files those commits touched"; [ -n "$BASE" ] && git log --name-only --format= "$BASE"..HEAD | sort -u
