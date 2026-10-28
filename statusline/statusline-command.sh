@@ -328,36 +328,39 @@ if [ -n "$cost_val" ] && [ "$cost_val" != "0" ] && [ "$cost_val" != "0.0" ]; the
 fi
 
 # ── Assemble output ──────────────────────────────────────────────────────────
-if [ -n "$effort_label" ]; then
-  out="${health} ${model} ${effort_label}"
-else
-  out="${health} ${model}"
+# Segments, one per line, in display order. Empty ones are skipped.
+head_str="${health} ${model}${effort_label:+ ${effort_label}}"
+
+# First 8 chars of the session id: enough to tell sessions apart and to find
+# the transcript (~/.claude/projects/<project>/<session_id>.jsonl).
+id_str=""
+if [ -n "$session_id" ]; then
+  id_str="🆔 $(printf '%.8s' "$session_id")"
 fi
 
-if [ -n "$ctx_str" ]; then
-  out="${out}${SEP}${ctx_str}"
-fi
+segments=$(printf '%s\n' "$head_str" "$ctx_str" "$cache_str" "$daily_str" "$weekly_str" \
+  "⏱ ${duration_str}" "$branch_str" "$cost_str" "$id_str")
 
-if [ -n "$cache_str" ]; then
-  out="${out}${SEP}${cache_str}"
-fi
+# Wrap to the terminal width: Claude Code passes COLUMNS. Unknown width falls
+# back to 100. Keep 2 columns spare for the status line's own padding.
+cols="${COLUMNS:-$(tput cols 2>/dev/null)}"
+case "$cols" in ''|*[!0-9]*) cols=100 ;; esac
+width=$(( cols - 2 ))
 
-if [ -n "$daily_str" ]; then
-  out="${out}${SEP}${daily_str}"
-fi
-
-if [ -n "$weekly_str" ]; then
-  out="${out}${SEP}${weekly_str}"
-fi
-
-out="${out}${SEP}⏱ ${duration_str}"
-
-if [ -n "$branch_str" ]; then
-  out="${out}${SEP}${branch_str}"
-fi
-
-if [ -n "$cost_str" ]; then
-  out="${out}${SEP}${cost_str}"
-fi
-
-printf "%s" "$out"
+# Pack segments greedily: a segment joins the current line if it fits, else
+# starts a new one. Visible width ignores ANSI colors and counts emoji as 2.
+printf '%s' "$segments" | perl -CS -e '
+  my ($w, $sep) = @ARGV;
+  my (@lines, $cur, $cw);
+  while (my $s = <STDIN>) {
+    chomp $s;
+    next unless length $s;
+    (my $p = $s) =~ s/\e\[[0-9;]*m//g;
+    my $sw = length($p) + scalar(() = $p =~ /[\x{1F000}-\x{1FAFF}]/g);
+    if (!defined $cur) { ($cur, $cw) = ($s, $sw) }
+    elsif ($cw + length($sep) + $sw <= $w) { $cur .= $sep . $s; $cw += length($sep) + $sw }
+    else { push @lines, $cur; ($cur, $cw) = ($s, $sw) }
+  }
+  push @lines, $cur if defined $cur;
+  print join("\n", @lines);
+' "$width" "$SEP"
