@@ -1,10 +1,18 @@
 # Statusline
 
-Custom Claude Code status line showing model, effort level, context window usage, cache read/write tokens, rate limits, session duration, git branch, and cost.
+Custom Claude Code status line showing model, effort level, context window usage, cache read/write tokens, rate limits, session duration, git branch, cost, and session ID. It wraps onto more lines when the terminal is too narrow.
 
 ## What it shows
 
-`🟢 Claude Sonnet 4.6 ● high  |  🧠 Context ●●○○○○ 32% (45,123 tokens)  |  📖 Read 44K (Σ 1.8M)  ✍ Write 1K (Σ 108K)  |  Daily ●○○○○○ 12% → 4h23m  |  Weekly ○○○○○○ 5% → 6d2h  |  ⏱ 14m  |  🌿 main  |  💰 $0.042`
+`🟢 Claude Sonnet 4.6 ● high  |  🧠 Context ●●○○○○ 32% (45,123 tokens)  |  📖 Read 44K (Σ 1.8M)  ✍ Write 1K (Σ 108K)  |  Daily ●○○○○○ 12% → 4h23m  |  Weekly ○○○○○○ 5% → 6d2h  |  ⏱ 14m  |  🌿 main  |  💰 $0.042  |  🆔 4d8be2bf`
+
+On an 80-column terminal the same segments wrap:
+
+```
+🟢 Claude Sonnet 4.6 ● high  |  🧠 Context ●●○○○○ 32% (45,123 tokens)
+📖 Read 44K (Σ 1.8M)  ✍ Write 1K (Σ 108K)  |  Daily ●○○○○○ 12% → 4h23m
+Weekly ○○○○○○ 5% → 6d2h  |  ⏱ 14m  |  🌿 main  |  💰 $0.042  |  🆔 4d8be2bf
+```
 
 - **Health indicator**: 🟢 / 🟡 / 🔴 based on worst pressure across context + rate limits
 - **Model + effort**: current model and effort level setting
@@ -14,6 +22,8 @@ Custom Claude Code status line showing model, effort level, context window usage
 - **Session duration**: time elapsed since session start
 - **Git branch**: current branch name
 - **Cost**: session cost in USD (`cost.total_cost_usd`, estimated at list price)
+- **Session ID**: first 8 characters, enough to tell sessions apart. The full ID is the transcript's file name: `ls ~/.claude/projects/*/<first 8>*.jsonl`
+- **Wrapping**: segments are packed greedily into lines no wider than the terminal (`COLUMNS`, which Claude Code passes; falls back to `tput cols`, then 100), with 2 columns spare. Width ignores ANSI colors and counts emoji as 2 columns. Needs `perl` (preinstalled on macOS)
 
 ## Setup on a new device
 
