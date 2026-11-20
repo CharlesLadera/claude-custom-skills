@@ -22,7 +22,7 @@ Most skills are prose: no build, no lint, no tests. "Verified" means re-read for
 Three ship real code, and those are judged the ordinary way:
 
 - `context-audit/scripts/audit.py` — a script, no test suite.
-- `disk-cleanup/` — `scripts/scan.py`, `scripts/classify.py`, and 287 tests run by `disk-cleanup/tests/run.sh`. Run them before and after changing anything there.
+- `disk-cleanup/` — `scripts/scan.py`, `scripts/classify.py`, and 380 tests run by `disk-cleanup/tests/run.sh` (macOS, and Windows since `test_windows.py`; the `test_execution.sh` rehearsal runs on macOS only). Run them before and after changing anything there.
 - `gmail-organize/` — `scripts/scan.py` (read-only), `apply/apply.py` (the only writer), `lib/gws.py`, and the tests run by `gmail-organize/tests/run.sh`. Run them before and after changing anything there.
 
 `disk-cleanup/tests/test_safety.py` is load-bearing, not housekeeping: it fails the suite if any deletion or move primitive appears in a file under `disk-cleanup/scripts/`, which is what makes the scanner structurally incapable of deleting. Deletion lives in `SKILL.md`, after approval, by design. Never weaken that test to make a change pass — if a change seems to need it, the change is wrong.

@@ -12,17 +12,29 @@ scripts/ can delete.
 
 import json
 import os
+import posixpath
 import re
 import time
 from pathlib import Path
 from typing import Optional
 
-HOME = os.path.expanduser("~")
+# Every path this module handles is "/"-separated, on every OS: scan.py
+# emits Windows paths as "C:/Users/...". So path logic here uses posixpath,
+# never os.path - on Windows, os.path.normpath rewrites "/" to "\" and every
+# pattern below silently stops matching.
+HOME = os.path.expanduser("~").replace("\\", "/")
+
+# A user's home directory: /Users/x (macOS), /home/x (Linux), C:/Users/x (Windows).
+_HOME_RE = r"^(?:[A-Za-z]:)?/(?:Users|home)/[^/]+"
+# A Windows home directory only. Windows-only patterns anchor on this, so
+# they can never change what is protected on macOS or Linux.
+_WIN_HOME_RE = r"^[A-Za-z]:/Users/[^/]+"
+_I = re.IGNORECASE  # Windows paths are case-insensitive; its patterns must be too
 
 # (compiled pattern, reason) - order matters only for message quality.
 _DENY = [
     (re.compile(r"/\.vscode/extensions/"), "VS Code extension dependency; removing it breaks the extension"),
-    (re.compile(r"^/(Users|home)/[^/]+/\.(config|local)/.*node_modules"), "dependency of an installed tool in the user's config directory, not a project"),
+    (re.compile(_HOME_RE + r"/\.(config|local)/.*node_modules"), "dependency of an installed tool in the user's config directory, not a project"),
     (re.compile(r"/\.npm/_npx/"), "npx execution cache used by installed tooling"),
     (re.compile(r"\.(img|qcow2|vdi|vmdk|raw)$"), "disk image or raw data file; deleting it can destroy a VM or irreplaceable media"),
     (re.compile(r"\.photoslibrary(/|$)"), "Photos library; irreplaceable user data"),
@@ -30,7 +42,11 @@ _DENY = [
     (re.compile(r"/Library/Mobile Documents(/|$)"), "iCloud Drive; may be placeholders for cloud-only files"),
     (re.compile(r"^/System/Volumes/(VM|Preboot|Update)(/|$)"), "OS-managed volume; never user-serviceable"),
     (re.compile(r"^/System/Volumes/Data/private/var/db(/|$)"), "system database"),
-    (re.compile(r"^/(Users|home)/[^/]+/\.[^/]+/extensions/.*node_modules"),
+    (re.compile(_HOME_RE + r"/\.[^/]+/extensions/.*node_modules"),
+     "editor or IDE extension dependency; removing it breaks the extension"),
+    # An installed extension folder (publisher.name-1.2.3) wherever the
+    # editor keeps it, including a moved one such as /Volumes/X/caches/devin/extensions.
+    (re.compile(r"/extensions/[^/]+\.[^/]+-\d+\.\d+[^/]*/(.*/)?node_modules(/|$)"),
      "editor or IDE extension dependency; removing it breaks the extension"),
     (re.compile(r"/Library/Application Support/.*node_modules"),
      "dependency inside an installed application's support data, not a project"),
@@ -42,13 +58,31 @@ _DENY = [
      "dependency of a package-manager-installed tool, not a project"),
     (re.compile(r"^/(private/)?(var/folders|tmp)/"),
      "OS-managed temporary directory, not user data"),
+    # Windows. Drive-anchored and case-insensitive.
+    (re.compile(r"^[A-Z]:/.*\.vhdx?$", _I),
+     "Windows VM disk image (Docker, WSL, Hyper-V); deleting it destroys the VM"),
+    (re.compile(r"^[A-Z]:/Windows(/|$)", _I), "Windows system directory; never user-serviceable"),
+    (re.compile(r"^[A-Z]:/(pagefile|hiberfil|swapfile)\.sys$", _I),
+     "Windows virtual memory or hibernation file; change it in System settings, never delete it"),
+    (re.compile(r"^[A-Z]:/System Volume Information(/|$)", _I),
+     "restore points and volume metadata; manage them in System Protection"),
+    (re.compile(r"^[A-Z]:/Program Files( \(x86\))?/WindowsApps(/|$)", _I),
+     "Microsoft Store app installs; uninstall them in Settings > Apps"),
+    (re.compile(r"^[A-Z]:/Program Files( \(x86\))?/.*node_modules", _I),
+     "dependency inside an installed application, not a project"),
+    (re.compile(_WIN_HOME_RE + r"/AppData/.*(node_modules|/target|/\.?venv)(/|$)", _I),
+     "dependency inside application or tool data under AppData, not a project"),
+    (re.compile(_WIN_HOME_RE + r"/scoop/(apps|persist|shims)(/|$)", _I),
+     "Scoop-installed tool; uninstall it with scoop, not by deleting files"),
+    (re.compile(_WIN_HOME_RE + r"/(OneDrive|Google Drive|iCloudDrive|Dropbox)( - [^/]+)?(/|$)", _I),
+     "cloud-synced folder; deleting here deletes the cloud copy too, and some files may be placeholders"),
 ]
 
 
 def is_protected(path):
     # type: (str) -> Optional[str]
     """Return why PATH may never be proposed for deletion, or None."""
-    path = os.path.normpath(path)
+    path = posixpath.normpath(path)
     for pattern, reason in _DENY:
         if pattern.search(path):
             return reason
@@ -107,8 +141,49 @@ def _expand(manifest_path):
     return manifest_path
 
 
-def classify_row(path, manifest):
-    # type: (str, list) -> dict
+_DRIVE_PATH = re.compile(r"^[A-Za-z]:/")
+
+
+def _match_key(path):
+    # type: (str) -> str
+    """PATH as compared against manifest entries.
+
+    A drive-letter path is a Windows path, and Windows paths are
+    case-insensitive: the walk reports "C:/Users/x/AppData/Local/npm-cache"
+    in whatever case it was created, while the manifest spells it one way.
+    Casefolded there and only there - a POSIX path keeps exact case.
+    """
+    return path.casefold() if _DRIVE_PATH.match(path) else path
+
+
+def is_volume_root(path):
+    # type: (str) -> bool
+    """True for "/" and a bare drive root such as "C:/"."""
+    return path == "/" or bool(re.match(r"^[A-Za-z]:/?$", path))
+
+
+def alias_path(path, relocations):
+    # type: (str, Optional[list]) -> str
+    """PATH rewritten to its home-form alias when it sits in a moved location.
+
+    RELOCATIONS is scan.py's list of {"target", "alias"}: ~/.npm symlinked to
+    /Volumes/X/caches/npm gives target /Volumes/X/caches/npm, alias ~/.npm.
+    The manifest and the denylist name only home-form paths, so without
+    this a moved cache is invisible to both. Longest target wins.
+    """
+    best = None
+    for r in relocations or ():
+        t = r["target"].rstrip("/") or "/"
+        if path == t or path.startswith(t + "/"):
+            if best is None or len(t) > len(best[0]):
+                best = (t, r["alias"])
+    if best is None:
+        return path
+    return best[1] + path[len(best[0]):]
+
+
+def classify_row(path, manifest, relocations=None):
+    # type: (str, list, Optional[list]) -> dict
     """Classify a filesystem path against manifest entries.
 
     Returns dict with keys: tier (str or None), action (str), why (str),
@@ -117,14 +192,17 @@ def classify_row(path, manifest):
     the METHOD column without re-searching the manifest a second time.
     Action is one of: proposed, ask, review only, protected.
     """
-    path = os.path.normpath(path)
-    reason = is_protected(path)
+    path = posixpath.normpath(path)
+    alias = alias_path(path, relocations)
+    # Protected under either name: the real path or the moved-from one.
+    reason = is_protected(path) or is_protected(alias)
     if reason:
         return {"tier": None, "action": "protected", "why": reason, "regen": "",
                 "id": None, "command": None}
+    key = _match_key(alias)
     for entry in manifest:
-        target = _expand(entry["path"])
-        if path == target or path.startswith(target + "/"):
+        target = _match_key(_expand(entry["path"]))
+        if key == target or key.startswith(target + "/"):
             return {
                 "tier": entry["tier"],
                 "action": _ACTION_BY_TIER[entry["tier"]],
@@ -148,9 +226,17 @@ def classify_row(path, manifest):
 _METHOD_TRASH = "tra" + "sh"
 _METHOD_EMPTY_TRASH = "empty Tra" + "sh yourself"
 
+# Windows: this skill runs a manifest command there, nothing else. A row
+# reclaimed by moving or deleting files is the user's own action, so its
+# METHOD says so - and still says which: the Recycle Bin (reversible) or a
+# permanent delete (a cheap cache, where recycling only relocates the bytes).
+_METHOD_WIN_RECYCLE = "Recycle Bin yourself"
+_METHOD_WIN_DELETE = "delete yourself (permanent)"
+_METHOD_WIN_EMPTY_BIN = "empty Recycle Bin yourself"
 
-def row_method(action, tier, entry_id, command):
-    # type: (str, Optional[str], Optional[str], Optional[str]) -> Optional[str]
+
+def row_method(action, tier, entry_id, command, os_name="macos"):
+    # type: (str, Optional[str], Optional[str], Optional[str], str) -> Optional[str]
     """How SKILL.md step 5 would reclaim this row's bytes - the METHOD column.
 
     Only rows the user is ever asked about carry a method; a review-only or
@@ -167,9 +253,18 @@ def row_method(action, tier, entry_id, command):
          never free them;
       4. everything else - `free` and `project` entries with no command -
          moves to Trash, reversibly.
+
+    On Windows (OS_NAME "windows") the same priority holds, with the
+    Windows labels above for every row that is not a command.
     """
     if action not in _RECLAIMABLE_ACTIONS:
         return None
+    if os_name == "windows":
+        if entry_id == "recycle-bin":
+            return _METHOD_WIN_EMPTY_BIN
+        if command:
+            return command
+        return _METHOD_WIN_DELETE if tier == "cheap" else _METHOD_WIN_RECYCLE
     if entry_id == "user-trash":
         return _METHOD_EMPTY_TRASH
     if command:
@@ -348,9 +443,14 @@ def render_apps(apps):
     ordered = sorted(apps, key=lambda a: a["bytes"], reverse=True)
     out = ["%-7s %-36s %-12s %s" % ("SIZE", "APP", "LAST USED", "ACTION")]
     for a in ordered:
+        # A Windows app has a display name and may have no install path; a
+        # "~" marks a size taken from the installer's estimate, not measured.
+        size = human_size(a["bytes"])
+        if a.get("size_source") == "estimated":
+            size = "~" + size
         out.append("%-7s %-36s %-12s %s" % (
-            human_size(a["bytes"]),
-            _fit_path(a["path"].rsplit("/", 1)[-1], width=36),
+            size,
+            _fit_path(a.get("name") or a["path"].rsplit("/", 1)[-1], width=36),
             a.get("last_used") or "unknown",
             "review only",
         ))
@@ -366,7 +466,8 @@ def drop_nested(rows):
     total. Dedup runs ACROSS buckets - a child inside a counted parent is
     already inside that parent's bytes regardless of either one's action.
 
-    A "/" row is never treated as any other row's ancestor: "/".rstrip("/")
+    A volume root - "/", or a Windows drive root such as "C:/" - is never
+    treated as any other row's ancestor: "/".rstrip("/")
     is "", so the naive prefix check below would otherwise read as "does
     this path start with /", which is true of every absolute path - one
     scan-root stub would silently swallow the entire tree beneath it. This
@@ -381,8 +482,8 @@ def drop_nested(rows):
             if r["path"] == k["path"]:
                 contained = True
                 break
-            if k["path"] == "/":
-                continue
+            if is_volume_root(k["path"]):
+                continue  # "/" and "C:/" alike - see the docstring
             if r["path"].startswith(k["path"].rstrip("/") + "/"):
                 contained = True
                 break
@@ -498,18 +599,18 @@ def full_disk_access_note(scan_data, rows):
     matches what the user sees as distinct rows, not one per nested du level.
     """
     fda = scan_data.get("full_disk_access") or {}
-    if fda.get("granted"):
+    if fda.get("granted") or fda.get("applicable") is False:
         return ""
-    library_root = os.path.join(HOME, "Library")
+    library_root = posixpath.join(HOME, "Library")
     actionable = _dedup_within_roots([r for r in rows if r["action"] in _RECLAIMABLE_ACTIONS])
     affected = [r for r in actionable
-                if r["path"] == library_root or r["path"].startswith(library_root + os.sep)]
+                if r["path"] == library_root or r["path"].startswith(library_root + "/")]
     # Exclude ~/Library/Caches - empirically verified reachable without Full Disk Access
     # by successful removal on 2026-09-18. Everything else under ~/Library (including
     # ~/Library/Logs and ~/Library/Developer) remains in the warning.
-    caches_root = os.path.join(library_root, "Caches")
+    caches_root = posixpath.join(library_root, "Caches")
     affected = [r for r in affected
-                if not (r["path"] == caches_root or r["path"].startswith(caches_root + os.sep))]
+                if not (r["path"] == caches_root or r["path"].startswith(caches_root + "/"))]
     if not affected:
         return ""
     n = len(affected)
@@ -540,20 +641,37 @@ def render_scan_age_header(scan_data, now_ts):
     return line
 
 
+WINDOWS_APPS_NOTE = (
+    "note: LAST USED comes from Explorer's launch history (UserAssist): only launches from\n"
+    "      the Start menu, taskbar or Explorer count, so an app started by a game launcher,\n"
+    "      a terminal or another app reads older than it is, or unknown. \"~\" marks a size\n"
+    "      from the installer's estimate, not measured."
+)
+
+
 DOCKER_MANIFEST_ID = "docker-images"
 DOCKER_ROW_PATH = "docker (stopped containers + build cache)"
 
 
-def build_rows(scan_data, manifest, now_ts):
-    """Join a scan payload against MANIFEST into renderable rows."""
+PNPM_SHARED_WHY = (
+    "pnpm links or clones these files from its store at %s on the same volume; "
+    "removing this directory frees little of the size shown. Remove the project "
+    "or worktree, then run `pnpm store prune` with that project's pnpm version")
+
+
+def build_rows(scan_data, manifest, now_ts, os_name="macos"):
+    """Join a scan payload against MANIFEST into renderable rows.
+
+    OS_NAME picks row_method's METHOD vocabulary (see row_method)."""
     rows = []
     by_path = {}
+    relocations = scan_data.get("relocations") or []
     for root in scan_data.get("roots", []):
         root_path = root.get("root", "")
         # scan.py canonicalises paths; the data volume's own row becomes "/".
         canonical_root = "/" if root_path == "/System/Volumes/Data" else root_path
         for raw in list(root.get("rows", [])) + list(root.get("files", [])):
-            info = classify_row(raw["path"], manifest)
+            info = classify_row(raw["path"], manifest, relocations)
             mtime = raw.get("mtime")
             age_days = int((now_ts - mtime) / 86400) if mtime else -1
             row = {
@@ -564,7 +682,7 @@ def build_rows(scan_data, manifest, now_ts):
                 "action": info["action"],
                 "why": info["why"],
                 "regen": info["regen"],
-                "method": row_method(info["action"], info["tier"], info["id"], info["command"]),
+                "method": row_method(info["action"], info["tier"], info["id"], info["command"], os_name),
                 "is_root": raw["path"] == canonical_root,
                 "root": canonical_root,
             }
@@ -590,17 +708,25 @@ def build_rows(scan_data, manifest, now_ts):
         for proj in root.get("projects", []):
             path = proj["path"]
             proj_age = proj.get("age_days", -1)
-            if proj.get("qualifies"):
-                tier, action = "project", "ask"
-                why = "rebuildable project artifact, untouched for %d+ days" % max(proj_age, 0)
-                regen = "rebuilt by your package manager on next install or build"
+            info = classify_row(path, manifest, relocations)
+            # The scan's own `qualifies` checked the denylist against the
+            # real path only; a moved tool directory (an editor's extensions,
+            # npx's cache) is protected under its home-form alias.
+            if proj.get("qualifies") and info["action"] != "protected":
+                if proj.get("pnpm_store_shared"):
+                    tier, action = None, "review only"
+                    why = PNPM_SHARED_WHY % proj.get("pnpm_store")
+                    regen = ""
+                else:
+                    tier, action = "project", "ask"
+                    why = "rebuildable project artifact, untouched for %d+ days" % max(proj_age, 0)
+                    regen = "rebuilt by your package manager on next install or build"
                 entry_id, command = None, None
             else:
-                info = classify_row(path, manifest)
                 tier, action = info["tier"], info["action"]
                 why, regen = info["why"], info["regen"]
                 entry_id, command = info["id"], info["command"]
-            method = row_method(action, tier, entry_id, command)
+            method = row_method(action, tier, entry_id, command, os_name)
 
             existing = by_path.get(path)
             if existing is not None:
@@ -645,7 +771,7 @@ def build_rows(scan_data, manifest, now_ts):
                 "action": action,
                 "why": entry["why"],
                 "regen": entry["regen"],
-                "method": row_method(action, entry["tier"], entry.get("id"), entry.get("command")),
+                "method": row_method(action, entry["tier"], entry.get("id"), entry.get("command"), os_name),
                 "is_root": False,
                 "root": "docker",
             })
@@ -662,17 +788,21 @@ def main(argv=None):
     p.add_argument("--os", dest="os_name", default=None)
     args = p.parse_args(argv if argv is not None else sys.argv[1:])
 
-    with open(args.scan_json) as fh:
+    with open(args.scan_json, encoding="utf-8") as fh:
         data = json.load(fh)
 
     os_name = args.os_name or detect_os(sys.platform)
+    # A Windows console or pipe may not be UTF-8; a file name it cannot
+    # encode must render escaped, never crash the report halfway through.
+    if os_name == "windows" and hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="backslashreplace")
     manifest = load_manifest(os_name, Path(__file__).resolve().parent / "manifests")
     now_ts = time.time()
 
     print(render_scan_age_header(data, now_ts))
     print()
 
-    rows = build_rows(data, manifest, now_ts)
+    rows = build_rows(data, manifest, now_ts, os_name)
     r_totals = root_totals(data)
     print(render_table(rows, r_totals))
 
@@ -681,6 +811,8 @@ def main(argv=None):
         print()
         print("APPLICATIONS")
         print(render_apps(apps))
+        if os_name == "windows":
+            print(WINDOWS_APPS_NOTE)
 
     notes = render_ask_notes(rows)
     if notes:
@@ -696,9 +828,15 @@ def main(argv=None):
     print("reclaimable: %s   review only: %s (includes the reclaimable bytes above, "
           "which sit inside larger review-only directories)" %
           (human_size(t["reclaimable"]), human_size(t["review_only"])))
-    print("unreadable (need sudo): %s across %d entries" % (human_size(t["unmeasured"]), t["unmeasured_count"]))
+    print("unreadable (need %s): %s across %d entries" % (
+        "admin" if os_name == "windows" else "sudo",
+        human_size(t["unmeasured"]), t["unmeasured_count"]))
     print("paths that vanished mid-scan:   %d" % transient)
-    print("local snapshots: %d" % len(data.get("snapshots", [])))
+    snapshots = data.get("snapshots", [])
+    if snapshots is None:
+        print("local snapshots: not checked - %s" % data.get("snapshots_note", "unknown"))
+    else:
+        print("local snapshots: %d" % len(snapshots))
     fda_note = full_disk_access_note(data, rows)
     if fda_note:
         print(fda_note)

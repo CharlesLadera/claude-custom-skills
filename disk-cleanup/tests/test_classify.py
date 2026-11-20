@@ -108,7 +108,7 @@ ROWS = [
      "age_days": 2, "tier": "free", "action": "proposed"},
     {"path": "/Users/me/.cache/uv", "bytes": 7_086_696_038,
      "age_days": 5, "tier": "costly", "action": "ask"},
-    {"path": "/Volumes/External/GameLibrary", "bytes": 49_392_123_904,
+    {"path": "/Volumes/External/SteamLibrary", "bytes": 49_392_123_904,
      "age_days": 60, "tier": None, "action": "review only"},
 ]
 
@@ -137,7 +137,7 @@ class TestClassifyRow(unittest.TestCase):
         self.assertIn("GB", row["regen"])
 
     def test_unmatched_path_is_review_only(self):
-        row = classify.classify_row("/Volumes/External/GameLibrary", MANIFEST)
+        row = classify.classify_row("/Volumes/External/SteamLibrary", MANIFEST)
         self.assertEqual(row["action"], "review only")
         self.assertIsNone(row["tier"])
 
@@ -189,12 +189,126 @@ class TestBuildRows(unittest.TestCase):
 
     def test_unmatched_path_comes_through_as_review_only(self):
         scan_data = {"roots": [{
-            "rows": [{"path": "/Volumes/External/GameLibrary", "bytes": 100,
+            "rows": [{"path": "/Volumes/External/SteamLibrary", "bytes": 100,
                       "mtime": self.now}],
             "files": [],
         }]}
         rows = classify.build_rows(scan_data, MANIFEST, self.now)
         self.assertEqual(rows[0]["action"], "review only")
+
+
+MACOS_MANIFEST = classify.load_manifest(
+    "macos", Path(__file__).resolve().parent.parent / "scripts" / "manifests")
+
+
+class TestRelocatedPaths(unittest.TestCase):
+    """A cache moved off the home directory, by symlink or config."""
+
+    RELOCS = [
+        {"target": "/Volumes/TG/caches/npm", "alias": "/Users/me/.npm"},
+        {"target": "/Volumes/TG/caches/uv", "alias": "/Users/me/.cache/uv"},
+        {"target": "/Volumes/TG/caches/devin/extensions", "alias": "/Users/me/.devin/extensions"},
+    ]
+
+    def setUp(self):
+        self.saved = classify.HOME
+        classify.HOME = "/Users/me"
+        self.addCleanup(setattr, classify, "HOME", self.saved)
+        self.now = 1_700_000_000.0
+
+    def test_alias_path_rewrites_the_moved_prefix(self):
+        self.assertEqual(classify.alias_path("/Volumes/TG/caches/npm/_cacache", self.RELOCS),
+                         "/Users/me/.npm/_cacache")
+
+    def test_alias_path_needs_a_whole_path_component(self):
+        self.assertEqual(classify.alias_path("/Volumes/TG/caches/npm2", self.RELOCS),
+                         "/Volumes/TG/caches/npm2")
+
+    def test_alias_path_prefers_the_longest_target(self):
+        relocs = [{"target": "/V/a", "alias": "/Users/me/.a"},
+                  {"target": "/V/a/b", "alias": "/Users/me/.b"}]
+        self.assertEqual(classify.alias_path("/V/a/b/c", relocs), "/Users/me/.b/c")
+
+    def test_moved_npm_cache_matches_its_manifest_entry(self):
+        info = classify.classify_row("/Volumes/TG/caches/npm", MACOS_MANIFEST, self.RELOCS)
+        self.assertEqual(info["id"], "npm-cache")
+        self.assertEqual(info["command"], "npm cache clean --force")
+
+    def test_moved_uv_cache_matches_its_manifest_entry(self):
+        info = classify.classify_row("/Volumes/TG/caches/uv", MACOS_MANIFEST, self.RELOCS)
+        self.assertEqual(info["id"], "uv-cache")
+
+    def test_without_relocations_a_moved_cache_stays_review_only(self):
+        info = classify.classify_row("/Volumes/TG/caches/npm", MACOS_MANIFEST)
+        self.assertEqual(info["action"], "review only")
+
+    def test_moved_npx_cache_is_protected(self):
+        info = classify.classify_row("/Volumes/TG/caches/npm/_npx/abc/node_modules",
+                                     MACOS_MANIFEST, self.RELOCS)
+        self.assertEqual(info["action"], "protected")
+
+    def test_qualifying_project_in_a_moved_tool_dir_is_protected(self):
+        # The scan marked it qualifying from the real path alone; the alias
+        # shows it is npx's cache.
+        scan_data = {"relocations": self.RELOCS, "roots": [{
+            "root": "/Volumes/TG", "rows": [], "files": [],
+            "projects": [{"path": "/Volumes/TG/caches/npm/_npx/abc/node_modules",
+                          "bytes": 10, "age_days": 60, "qualifies": True}]}]}
+        rows = classify.build_rows(scan_data, MACOS_MANIFEST, self.now)
+        self.assertEqual(rows[0]["action"], "protected")
+
+    def test_display_path_stays_the_real_location(self):
+        scan_data = {"relocations": self.RELOCS, "roots": [{
+            "root": "/Volumes/TG", "files": [], "projects": [],
+            "rows": [{"path": "/Volumes/TG/caches/npm", "bytes": 10, "mtime": self.now}]}]}
+        rows = classify.build_rows(scan_data, MACOS_MANIFEST, self.now)
+        self.assertEqual(rows[0]["path"], "/Volumes/TG/caches/npm")
+        self.assertEqual(rows[0]["method"], "npm cache clean --force")
+
+
+class TestExtensionsAnywhereAreProtected(unittest.TestCase):
+    def test_moved_editor_extension_dependency_is_protected(self):
+        self.assertIsNotNone(classify.is_protected(
+            "/Volumes/TG/caches/devin/extensions/ritwickdey.liveserver-5.7.10-universal/node_modules"))
+
+    def test_nested_extension_dependency_is_protected(self):
+        self.assertIsNotNone(classify.is_protected(
+            "/Volumes/TG/caches/devin/extensions/ms-python.python-2026.4.0-universal/out/client/node_modules"))
+
+    def test_project_folder_named_extensions_is_not_caught(self):
+        # No publisher.name-version folder: an ordinary project's own subfolder.
+        self.assertIsNone(classify.is_protected(
+            "/Users/me/code/app/extensions/billing/node_modules"))
+
+
+class TestPnpmSharedStore(unittest.TestCase):
+    def setUp(self):
+        self.now = 1_700_000_000.0
+
+    def rows(self, **proj):
+        base = {"path": "/Volumes/TG/code/app/node_modules", "bytes": 3 * 1024 ** 3,
+                "age_days": 60, "qualifies": True}
+        base.update(proj)
+        scan_data = {"roots": [{"root": "/Volumes/TG", "rows": [], "files": [],
+                                "projects": [base]}]}
+        return classify.build_rows(scan_data, MACOS_MANIFEST, self.now)
+
+    def test_pnpm_node_modules_sharing_its_store_is_not_offered(self):
+        row = self.rows(pnpm_store="/Volumes/TG/.pnpm-store/v11", pnpm_store_shared=True)[0]
+        self.assertEqual(row["action"], "review only")
+        self.assertIn("pnpm store prune", row["why"])
+        self.assertIn("/Volumes/TG/.pnpm-store/v11", row["why"])
+
+    def test_pnpm_store_on_another_volume_is_still_offered(self):
+        row = self.rows(pnpm_store="/Users/me/Library/pnpm/store", pnpm_store_shared=False)[0]
+        self.assertEqual(row["action"], "ask")
+
+    def test_row_from_an_older_scan_without_pnpm_facts_is_still_offered(self):
+        self.assertEqual(self.rows()[0]["action"], "ask")
+
+    def test_shared_store_row_is_not_counted_as_reclaimable(self):
+        rows = self.rows(pnpm_store="/Volumes/TG/.pnpm-store/v11", pnpm_store_shared=True)
+        self.assertEqual(classify.totals(rows, 0, 0)["reclaimable"], 0)
 
 
 class TestManifestEntry(unittest.TestCase):
@@ -353,7 +467,7 @@ class TestRenderTable(unittest.TestCase):
     def test_rows_are_ordered_biggest_first(self):
         out = classify.render_table(ROWS, root_totals={"": 100_000_000_000})
         lines = [l for l in out.splitlines() if "/" in l]
-        self.assertIn("GameLibrary", lines[0])
+        self.assertIn("SteamLibrary", lines[0])
         self.assertIn("BraveSoftware", lines[1])
 
     def test_header_names_every_column(self):
@@ -363,7 +477,7 @@ class TestRenderTable(unittest.TestCase):
 
     def test_review_only_rows_render_without_a_tier(self):
         out = classify.render_table(ROWS, root_totals={"": 100_000_000_000})
-        steam = [l for l in out.splitlines() if "GameLibrary" in l][0]
+        steam = [l for l in out.splitlines() if "SteamLibrary" in l][0]
         self.assertIn("review only", steam)
 
 
@@ -648,17 +762,17 @@ class TestRenderTablePercentages(unittest.TestCase):
         self.assertIn("100%", team_line)
 
     def test_a_smaller_child_gets_a_real_double_digit_share_not_9_percent(self):
-        # GameLibrary alone, without its root's own self-row also present -
+        # SteamLibrary alone, without its root's own self-row also present -
         # drop_nested legitimately collapses a review-only child into a
         # review-only parent when both are in the same render_table call
         # (that is the point of the cap in C1); this isolates the %ROOT
         # division fix from that separate, correct collapsing behaviour.
         rows = [
-            {"path": "/Volumes/External/GameLibrary", "bytes": 46_000_000_000, "age_days": 60,
+            {"path": "/Volumes/External/SteamLibrary", "bytes": 46_000_000_000, "age_days": 60,
              "tier": None, "action": "review only", "root": "/Volumes/External"},
         ]
         out = classify.render_table(rows, {"/Volumes/External": 166_000_000_000})
-        steam_line = [l for l in out.splitlines() if "GameLibrary" in l][0]
+        steam_line = [l for l in out.splitlines() if "SteamLibrary" in l][0]
         self.assertIn("28%", steam_line)  # 46/166 ~= 28%, not 46/(166+46+...) ~= 9%
 
     def test_missing_root_total_renders_dash_not_a_number(self):
@@ -828,7 +942,7 @@ class TestClassifyRowExposesMatchedEntry(unittest.TestCase):
         self.assertIsNone(row["command"])
 
     def test_unmatched_path_has_no_id_or_command(self):
-        row = classify.classify_row("/Volumes/External/GameLibrary", MANIFEST)
+        row = classify.classify_row("/Volumes/External/SteamLibrary", MANIFEST)
         self.assertIsNone(row["id"])
         self.assertIsNone(row["command"])
 
@@ -1055,7 +1169,7 @@ class TestMainIntegration(unittest.TestCase):
                 {"root": "/Volumes/External", "scanned_at": now - 1200,
                  "rows": [
                      {"path": "/Volumes/External", "bytes": 166_000_000_000, "mtime": now},
-                     {"path": "/Volumes/External/GameLibrary", "bytes": 46_000_000_000, "mtime": now},
+                     {"path": "/Volumes/External/SteamLibrary", "bytes": 46_000_000_000, "mtime": now},
                  ],
                  "files": [], "projects": [],
                  "unreadable_count": 4, "transient_count": 0},
@@ -1170,7 +1284,7 @@ class TestFullDiskAccessNote(unittest.TestCase):
     def test_non_library_rows_never_count(self):
         scan_data = {"full_disk_access": {"granted": False, "probed": []}}
         rows = [self._row("/Users/me/.cache/uv", action="ask"),
-                self._row("/Volumes/External/GameLibrary", action="review only")]
+                self._row("/Volumes/External/SteamLibrary", action="review only")]
         self.assertEqual(classify.full_disk_access_note(scan_data, rows), "")
 
     def test_counts_multiple_affected_rows_excluding_caches(self):
