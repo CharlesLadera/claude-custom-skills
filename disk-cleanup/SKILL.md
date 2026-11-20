@@ -1,6 +1,6 @@
 ---
 name: disk-cleanup
-description: Use when the user wants to free up disk space or find what is eating storage — phrases like "clean up my disk", "running out of space", "what is using all my storage", "clear caches", "find big files". Detects the host OS, scans every readable volume, and presents one table ranked biggest-to-smallest covering directories, large individual files, and applications. Removes nothing without explicit per-item approval. Do NOT use for cleaning up code (use a code-cleanup tool) or for freeing context/token budget (see context-audit).
+description: Use when the user wants to free up disk space or find what is eating storage — phrases like "clean up my disk", "running out of space", "what is using all my storage", "clear caches", "find big files". Detects the host OS, scans every readable volume, and presents one table ranked biggest-to-smallest covering directories, large individual files, and applications. Removes nothing without explicit per-item approval. Do NOT use for cleaning up code (see dead-code-detector) or for freeing context/token budget (see context-audit).
 ---
 
 # Disk Cleanup
@@ -12,7 +12,8 @@ space only from vetted targets the user approves item by item.
 
 The scan is wide; the proposal set is narrow. `scan.py` measures everything readable —
 including paths that must never be deleted — so the user sees the full picture. Only two
-kinds of row are ever proposed: the 18 entries in the macOS manifest, and a project
+kinds of row are ever proposed: the entries in this OS's manifest (18 vetted on macOS,
+20 on Windows), and a project
 artifact (`node_modules`, `target`, `.venv`, `venv`) that passes the ownership test in
 Notes below. Everything else renders `review only`.
 
@@ -39,11 +40,16 @@ This is a contract, not a guideline:
   `test_safety.py`: plain argv, a fixed tool allowlist, no destructive words.
 - **Never escalate with sudo.** Report a privileged region as unmeasured
   (`unreadable_count`) and hand the user the command to run themselves — never run it for
-  them.
+  them. On Windows the same rule covers "Run as administrator".
+- **On Windows the skill moves and deletes no files itself.** It runs approved manifest
+  commands only; every other row's `METHOD` ends in `yourself`, and step 5 hands the user
+  the path instead. See [Windows](#windows).
 
 ## Steps
 
 ### 1. Scan
+
+On Windows, run steps 1 and 2 with `python`, not `python3` (see [Windows](#windows)).
 
 ```bash
 python3 "${CLAUDE_SKILL_DIR}/scripts/scan.py" --json > "${TMPDIR:-/tmp}/disk-scan.json"
@@ -56,9 +62,10 @@ than `$HOME`, `~/Library/Caches/*` sits 5 levels down and `~/.cache/*` 4 — dep
 reach either.
 
 A cold scan can take several minutes (one measured run: ~8.5 minutes at depth 6 across two
-roots). Tell the user before starting. Results cache for 24h, and a cached payload
-missing a field the current schema expects is treated as stale automatically. `--refresh`
-forces a fresh walk.
+roots; a single 240G external volume took over 10). Tell the user before starting, and run
+it in the background. Results cache for 24h, and a cached payload missing a field the
+current schema expects is treated as stale automatically. So is one whose `schema` is
+below `scan.CACHE_SCHEMA`. `--refresh` forces a fresh walk.
 
 ### 2. Classify and present
 
@@ -137,6 +144,9 @@ end up running a native command instead; `METHOD` exists so that never happens.
 | `rm` | permanent `rm` on the path(s) — `cheap`-tier regenerable caches with no native command only; trashing them would relocate the bytes, not reclaim them. The user was already told this in step 4; do not soften it here. |
 | `trash` | `/usr/bin/trash <path>` — one item at a time, never batched. See "Run per item, verify every outcome" below. |
 | `empty Trash yourself` | run nothing. This is `~/.Trash` — report its size and tell the user to empty it themselves. Trashing the Trash reclaims 0 bytes while still counting toward what the user was asked about, and emptying it is inherently permanent, so it is the user's own action, never this skill's. |
+| `Recycle Bin yourself` (Windows) | run nothing. Give the user the full path and say they should send it to the Recycle Bin in Explorer. Ask them to say when it's done, then check the path is gone. |
+| `delete yourself (permanent)` (Windows) | run nothing. Give the user the full path and say they should delete it permanently (Shift+Delete in Explorer). Recycling a regenerable cache only moves the bytes. Same check afterwards. |
+| `empty Recycle Bin yourself` (Windows) | run nothing. The Windows `~/.Trash`: report its size and leave emptying it to the user. |
 
 **Run per item, verify every outcome — never report a success you did not check.** A
 command returning is not the same as an item being reclaimed:
@@ -209,6 +219,52 @@ came from:
   items went to Trash, say so and note that emptying it is a separate, user-initiated
   step; items reclaimed with `rm` have no such gap — they are already fully freed.
 
+## Windows
+
+Same steps and the same gate, with these differences.
+
+**Running it.** Use `python`: `python3` on Windows is usually the Microsoft Store alias,
+which prints an install prompt instead of running. The Bash tool's Git Bash understands
+`${TMPDIR:-/tmp}`, so the step 1 and 2 commands otherwise work as written.
+
+**What gets scanned.** Every fixed drive (`GetDriveTypeW`), not removable, network or RAM
+drives. Paths are written `C:/Users/...` with forward slashes, which is the form the
+denylist and manifest match. The walk is pure Python (`scan.win_walk`), not `du`/`find`.
+On Windows `find` is `find.exe`, a text-search tool. Sizes follow `du`'s rules:
+- hard links are counted once (`C:/Windows` alone can hold ~10G of WinSxS links that a
+  naive sum counts twice);
+- compressed, sparse and cloud-placeholder files count what they occupy on disk;
+- every file is rounded up to whole clusters;
+- junctions, symlinks and mount points are not followed.
+
+A cold scan of two drives (about 1TB used in total) took about 2.5 minutes in one
+measured run, and about half that on an immediate rerun with the file cache warm. Tell the user before
+starting, and offer `--root C:/` when they only asked about one drive.
+
+**What the report says differently:**
+- `METHOD` uses the Windows labels from step 5. Manifest commands run as on macOS.
+- `unreadable (need admin)` replaces `need sudo`. It can run to tens of GB:
+  `WindowsApps`, `System Volume Information`, parts of `ProgramData`, the user's
+  own Recycle Bin folder, and NTFS metadata. Point the user at Settings → System →
+  Storage, which shows those as categories, and never offer to elevate.
+- `local snapshots: not checked`. Restore points need an admin terminal
+  (`vssadmin list shadowstorage`), which is the user's to run.
+- `APPLICATIONS` lists the registry's installed programs. Size is the install folder as
+  measured, or the installer's estimate marked `~`. `LAST USED` comes from Explorer's
+  launch history (UserAssist), so an app started by a game launcher, a terminal or
+  another app reads older than it is, or `unknown`. Say so whenever the user is weighing
+  an uninstall on that date; it is a hint, not proof of disuse.
+- `C:/Windows`, `pagefile.sys`, `hiberfil.sys`, `.vhd`/`.vhdx` disk images (Docker, WSL,
+  Claude's VM), `WindowsApps`, Scoop installs, cloud-synced folders and anything
+  dependency-shaped under `AppData` or `Program Files` are `protected`. Shrinking the
+  page file or a WSL disk is a settings change, not a deletion. Name the right place
+  (System → Advanced → Performance → Virtual memory; `wsl --manage <distro> --set-sparse true`
+  or Docker Desktop's disk settings) if the user asks.
+
+**Step 4 on Windows.** Ask about command rows exactly as on macOS. A `yourself` row is
+still offered the same way, grouped or individual by tier. The question says plainly that
+the user will do the removal and how: Recycle Bin, or a permanent delete.
+
 ## Tiers
 
 | Tier | Meaning | Approval |
@@ -237,5 +293,25 @@ came from:
   non-qualifying hit is classified exactly like any other path — most land `review only`,
   tool-directory hits land `protected` — and never appears twice: if the directory also
   has a row from the ordinary size scan, that row is what gets upgraded, not duplicated.
-- Linux and Windows manifests exist (auto-selected via `classify.detect_os`) but are
-  small, conservative starter sets, not vetted like macOS's 18 entries.
+- **Moved caches.** The manifest and the denylist name home-form paths (`~/.npm`,
+  `~/.cache/uv`, `~/.devin/extensions`). A cache moved to another drive is still matched:
+  `scan.py`'s `relocations()` finds the symlink left behind (`~`, `~/.*`, `~/.*/*`,
+  `~/Library/Caches/*`) or the setting that moved it (`npm_config_cache` / `~/.npmrc`
+  `cache=`, `UV_CACHE_DIR` / `~/.config/uv/uv.toml` `cache-dir`). `classify.alias_path`
+  then matches each moved path under its home-form name, while the table still shows the
+  real location. Relocations are looked up on every run, never cached. When you trash a
+  moved directory that a symlink points to, the symlink is left dangling. Recreate the
+  empty target with `mkdir -p <path>` so the tool can write there again. Say so when
+  reporting the item.
+- **Extension folders anywhere.** Any `node_modules` inside an extension folder named
+  `publisher.name-1.2.3` is `protected`, wherever the editor keeps it.
+- **pnpm node_modules.** pnpm fills `node_modules` with hard links or copy-on-write clones
+  of its store, and `du` counts each one at full size. Removing a node_modules whose store
+  is on the same volume frees almost nothing: in one measured case, ten pnpm worktrees
+  the scan put at 29G freed 2G. `scan.py` reads `storeDir` from `node_modules/.modules.yaml`. A
+  qualifying artifact that shares its store renders `review only`, says why, and does
+  not count toward `reclaimable`. The space comes back only after `pnpm store prune`, run
+  with the pnpm version that owns that store. pnpm 12's global virtual store was not
+  shrunk by `store prune` in that case; that is unresolved.
+- Manifests are auto-selected via `classify.detect_os`. macOS (18 entries) and Windows
+  (20) are vetted against real machines; Linux is a small, conservative starter set.

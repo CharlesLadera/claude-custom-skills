@@ -2,13 +2,88 @@
   "os": "windows",
   "entries": [
     {"id": "recycle-bin", "path": "C:/$Recycle.Bin", "tier": "free",
-     "why": "Already discarded by the user.",
-     "regen": "Nothing regenerates.", "command": null},
+     "why": "Already discarded by the user; emptying is the Recycle Bin's purpose. The scan cannot read your own bin's folder without admin, so its size here is usually understated.",
+     "regen": "Nothing regenerates; items are gone permanently.", "command": null},
+
     {"id": "user-temp", "path": "~/AppData/Local/Temp", "tier": "free",
-     "why": "Temporary files; the OS treats this directory as disposable.",
+     "why": "Temporary files the OS treats as disposable. Files in use stay behind: close running apps first, and note that running Claude Code sessions keep their scratch space here.",
      "regen": "Recreated on demand.", "command": null},
-    {"id": "npm-cache", "path": "~/AppData/Roaming/npm-cache", "tier": "cheap",
-     "why": "npm package cache.", "regen": "Redownloaded per package.",
-     "command": "npm cache clean --force"}
+
+    {"id": "crash-dumps", "path": "~/AppData/Local/CrashDumps", "tier": "free",
+     "why": "Memory dumps from crashed apps.",
+     "regen": "Written again only if an app crashes.", "command": null},
+
+    {"id": "nvidia-dxcache", "path": "~/AppData/Local/NVIDIA/DXCache", "tier": "free",
+     "why": "NVIDIA DirectX shader cache.",
+     "regen": "Shaders recompile as games run; first launches may stutter briefly.", "command": null},
+
+    {"id": "d3d-shader-cache", "path": "~/AppData/Local/D3DSCache", "tier": "free",
+     "why": "Direct3D shader cache.",
+     "regen": "Shaders recompile as apps run.", "command": null},
+
+    {"id": "browser-cache-brave", "path": "~/AppData/Local/BraveSoftware/Brave-Browser/User Data/Default/Cache", "tier": "free",
+     "why": "Brave HTTP cache, default profile only.",
+     "regen": "Refills as pages are revisited; costs page-load time only.", "command": null},
+
+    {"id": "browser-code-cache-brave", "path": "~/AppData/Local/BraveSoftware/Brave-Browser/User Data/Default/Code Cache", "tier": "free",
+     "why": "Brave compiled-script cache, default profile only.",
+     "regen": "Rebuilt as pages are revisited.", "command": null},
+
+    {"id": "browser-cache-chrome", "path": "~/AppData/Local/Google/Chrome/User Data/Default/Cache", "tier": "free",
+     "why": "Chrome HTTP cache, default profile only.",
+     "regen": "Refills as pages are revisited.", "command": null},
+
+    {"id": "browser-cache-edge", "path": "~/AppData/Local/Microsoft/Edge/User Data/Default/Cache", "tier": "free",
+     "why": "Edge HTTP cache, default profile only.",
+     "regen": "Refills as pages are revisited.", "command": null},
+
+    {"id": "vscode-cache", "path": "~/AppData/Roaming/Code/Cache", "tier": "free",
+     "why": "VS Code's web-content cache.",
+     "regen": "Refills as VS Code runs.", "command": null},
+
+    {"id": "vscode-cached-vsix", "path": "~/AppData/Roaming/Code/CachedExtensionVSIXs", "tier": "free",
+     "why": "Downloaded VS Code extension packages that are already installed.",
+     "regen": "Redownloaded only if an extension is reinstalled.", "command": null},
+
+    {"id": "npm-cache", "path": "~/AppData/Local/npm-cache", "tier": "cheap",
+     "why": "npm package cache.",
+     "regen": "Redownloaded per package on next install.",
+     "command": "npm cache clean --force"},
+
+    {"id": "pnpm-store", "path": "~/AppData/Local/pnpm/store", "tier": "cheap",
+     "why": "pnpm content-addressable store. Prune removes only packages no project references.",
+     "regen": "Redownloaded on next install.", "command": "pnpm store prune"},
+
+    {"id": "pip-cache", "path": "~/AppData/Local/pip/cache", "tier": "cheap",
+     "why": "pip download and wheel cache.",
+     "regen": "Redownloaded per package on next install.", "command": "pip cache purge"},
+
+    {"id": "yarn-cache", "path": "~/AppData/Local/Yarn/Cache", "tier": "cheap",
+     "why": "Yarn package cache.",
+     "regen": "Redownloaded per package on next install.", "command": "yarn cache clean"},
+
+    {"id": "go-build-cache", "path": "~/AppData/Local/go-build", "tier": "cheap",
+     "why": "Go build cache.",
+     "regen": "Rebuilt on next go build or test.", "command": "go clean -cache"},
+
+    {"id": "uv-cache", "path": "~/AppData/Local/uv/cache", "tier": "costly",
+     "why": "uv Python wheel cache.",
+     "regen": "Redownloads and rebuilds wheels; can be several GB and minutes of build time.",
+     "command": null},
+
+    {"id": "playwright-browsers", "path": "~/AppData/Local/ms-playwright", "tier": "costly",
+     "why": "Chromium, Firefox and WebKit builds for the globally installed Playwright. One-off Playwright scripts fail until they are reinstalled.",
+     "regen": "`npx playwright install` redownloads about 1-2G; each repo with its own @playwright/test may need its own install too.",
+     "command": null},
+
+    {"id": "whisper-models", "path": "~/.cache/whisper", "tier": "costly",
+     "why": "Whisper model weights. The transcribe-video skill in this repo depends on these files.",
+     "regen": "Redownloads up to 2.9G per model on the next transcription run.",
+     "command": null},
+
+    {"id": "docker-images", "path": "__command_only__docker", "tier": "costly",
+     "why": "Stopped containers and build cache, which `docker system prune` removes. Dangling images go too, but Docker does not report their size separately, so the figure shown counts only containers and build cache and understates the real reclaim. Anonymous volumes are NOT removed - that needs a separate --volumes flag this command does not pass. On Windows the bytes live inside Docker's WSL disk image, which does not shrink by itself: compacting it is a separate step.",
+     "regen": "Images re-download or rebuild, often many GB. Stopped containers are deleted outright: anything written inside them since they last started is lost and cannot be regenerated.",
+     "command": "docker system prune"}
   ]
 }

@@ -9,7 +9,7 @@ If you only look at three, look at these. Each ships real code with tests, and e
 | Skill | What it does | Why it's different |
 |---|---|---|
 | [`context-audit`](#environment-upkeep) | Ranks every enabled plugin and MCP server by always-on token cost against how much you actually use it, then applies the cut list | Took one machine's per-request baseline from 51,590 to 6,495 tokens. Tells "unused here but busy in another repo" apart from "dead everywhere", so a cut never breaks another project |
-| [`disk-cleanup`](#disk-cleanup) | Scans every readable volume and ranks directories, large files and apps biggest-first in one table | The scanner is structurally unable to delete: a safety test fails the 287-test suite if a delete or move call ever appears in its scripts. Removal happens only after you approve each item by name |
+| [`disk-cleanup`](#disk-cleanup) | Scans every readable volume and ranks directories, large files and apps biggest-first in one table | The scanner is structurally unable to delete: a safety test fails the 380-test suite if a delete or move call ever appears in its scripts. Removal happens only after you approve each item by name |
 | [`gmail-organize`](#email) | Migrates a mailbox to one label convention, sorts the backlog and installs filters | One file can write, its write allowlist is pinned by tests (112 in the suite), every batch is validated before its first write, and `--undo-last` reverses it. Nothing is ever permanently deleted |
 
 Everything else here is a `SKILL.md` of instructions with no code and no test suite. They are checked by re-reading them against their sibling skills, not by running anything — treat them as well-specified workflows, not verified software.
@@ -91,7 +91,7 @@ Finding what is eating a disk, and reclaiming it without the tool deciding anyth
 |---|---|
 | [`disk-cleanup`](./disk-cleanup/SKILL.md) | Scan every readable volume, rank all storage biggest-first in one table, and reclaim only what you approve by name |
 
-The scan is wide and the proposal set is narrow, deliberately. It walks both volumes, ranks directories, large individual files and applications together, and shows the whole picture — including plenty it will never offer to touch. Only two kinds of row can be proposed: an entry in the vetted 18-entry macOS manifest, and a project artifact (`node_modules`, `target`, `.venv`) that has a sibling manifest, is 30+ days stale, and sits in a clean git worktree. Everything else renders `review only`.
+The scan is wide and the proposal set is narrow, deliberately. It walks both volumes, ranks directories, large individual files and applications together, and shows the whole picture — including plenty it will never offer to touch. Only two kinds of row can be proposed: an entry in the vetted manifest for the OS (18 entries on macOS, 20 on Windows), and a project artifact (`node_modules`, `target`, `.venv`) that has a sibling manifest, is 30+ days stale, and sits in a clean git worktree. Everything else renders `review only`. A cache moved to another drive is still recognised through the symlink or setting that moved it, and a pnpm `node_modules` that shares its store on the same volume is not offered, because removing it frees almost nothing.
 
 `scripts/scan.py` and `scripts/classify.py` contain no deletion code at all, and `tests/test_safety.py` fails the suite if a deletion or move primitive ever appears in either. Removal happens only in `SKILL.md`, after approval, and each row's `METHOD` column states exactly how it would be reclaimed — `trash`, permanent `rm` for regenerable caches where trashing would only relocate the bytes, or a native command like `npm cache clean --force`. `costly` and `project` rows are approved one at a time with their regeneration cost shown; `free` and `cheap` can be approved as a group, but only over a list just displayed.
 
@@ -201,7 +201,7 @@ The skills in `dev-workflow` — the journaling trio, the ticket family, `save-c
 | Skill | Needs on `PATH` |
 |---|---|
 | `context-audit` | `python3`, the `claude` CLI |
-| `disk-cleanup` | `python3`. macOS is the vetted target; Linux and Windows get small, conservative starter manifests |
+| `disk-cleanup` | `python3` (`python` on Windows). macOS and Windows are vetted; Linux gets a small, conservative starter manifest. On Windows the skill runs approved package-manager commands only and hands every other removal to you |
 | `gmail-organize` | `python3`, `gws` (`npm install -g @googleworkspace/cli`, then `gws auth login`) |
 | `end-of-day`, `start-of-day`, ticket family | `git`, [`gh`](https://cli.github.com/) for PR status |
 | `transcribe-video` | `whisper` (`pip install openai-whisper`), `ffmpeg` |

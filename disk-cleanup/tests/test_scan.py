@@ -66,7 +66,7 @@ class TestChooseRoots(unittest.TestCase):
 
 DU = """8388608\t/Users/me/Library/Caches/BraveSoftware
 6920602\t/Users/me/.cache/uv
-48234496\t/Volumes/External/GameLibrary
+48234496\t/Volumes/External/SteamLibrary
 """
 
 
@@ -90,7 +90,8 @@ class TestParseDu(unittest.TestCase):
 
 class TestCacheStaleness(unittest.TestCase):
     def test_fresh_cache_is_not_stale(self):
-        fresh = {"scanned_at": 1000.0, "rows": [], "files": [], "projects": []}
+        fresh = {"scanned_at": 1000.0, "rows": [], "files": [], "projects": [],
+                 "schema": scan.CACHE_SCHEMA}
         self.assertFalse(scan.is_stale(fresh, now_ts=1000.0 + 3600))
 
     def test_cache_older_than_a_day_is_stale(self):
@@ -107,8 +108,110 @@ class TestCacheStaleness(unittest.TestCase):
         self.assertTrue(scan.is_stale(fresh, now_ts=1000.0))
 
     def test_complete_fresh_payload_is_not_stale(self):
-        fresh = {"scanned_at": 1000.0, "rows": [], "files": [], "projects": []}
+        fresh = {"scanned_at": 1000.0, "rows": [], "files": [], "projects": [],
+                 "schema": scan.CACHE_SCHEMA}
         self.assertFalse(scan.is_stale(fresh, now_ts=1000.0 + 3600))
+
+    def test_payload_from_an_older_schema_is_stale_regardless_of_age(self):
+        # Project rows written before pnpm_store_shared existed would let a
+        # pnpm-linked node_modules be offered at its full, unreclaimable size.
+        old = {"scanned_at": 1000.0, "rows": [], "files": [], "projects": []}
+        self.assertTrue(scan.is_stale(old, now_ts=1000.0))
+
+    def test_write_cache_stamps_the_current_schema(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        payload = scan.write_cache("/x", tmp, {"rows": [], "files": [], "projects": []})
+        self.assertEqual(payload["schema"], scan.CACHE_SCHEMA)
+        self.assertFalse(scan.is_stale(payload, now_ts=payload["scanned_at"]))
+
+
+@unittest.skipIf(scan.IS_WINDOWS, "relocations are looked up on macOS and Linux only")
+class TestRelocations(unittest.TestCase):
+    def setUp(self):
+        self.base = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.base, ignore_errors=True)
+        self.home = os.path.join(self.base, "home")
+        self.away = os.path.join(self.base, "drive", "caches")
+        os.makedirs(os.path.join(self.home, ".cache"))
+        os.makedirs(os.path.join(self.home, ".devin"))
+        for d in ("npm", "whisper", "extensions", "uv"):
+            os.makedirs(os.path.join(self.away, d))
+
+    def found(self, env=None):
+        return {r["target"]: r["alias"] for r in scan.relocations(self.home, env or {})}
+
+    def test_symlinked_home_cache_maps_back_to_its_home_path(self):
+        os.symlink(os.path.join(self.away, "npm"), os.path.join(self.home, ".npm"))
+        os.symlink(os.path.join(self.away, "whisper"), os.path.join(self.home, ".cache", "whisper"))
+        found = self.found()
+        self.assertEqual(found[os.path.join(self.away, "npm")], os.path.join(self.home, ".npm"))
+        self.assertEqual(found[os.path.join(self.away, "whisper")],
+                         os.path.join(self.home, ".cache", "whisper"))
+
+    def test_symlink_two_levels_into_a_dot_directory_is_found(self):
+        # ~/.devin/extensions -> /Volumes/X/caches/devin/extensions
+        os.symlink(os.path.join(self.away, "extensions"),
+                   os.path.join(self.home, ".devin", "extensions"))
+        self.assertIn(os.path.join(self.away, "extensions"), self.found())
+
+    def test_cache_moved_by_config_file_is_found(self):
+        os.makedirs(os.path.join(self.home, ".config", "uv"))
+        with open(os.path.join(self.home, ".config", "uv", "uv.toml"), "w") as fh:
+            fh.write('cache-dir = "%s"\n' % os.path.join(self.away, "uv"))
+        self.assertEqual(self.found()[os.path.join(self.away, "uv")],
+                         os.path.join(self.home, ".cache", "uv"))
+
+    def test_cache_moved_by_env_var_is_found(self):
+        found = self.found({"npm_config_cache": os.path.join(self.away, "npm")})
+        self.assertEqual(found[os.path.join(self.away, "npm")], os.path.join(self.home, ".npm"))
+
+    def test_symlink_within_home_moves_nothing(self):
+        os.makedirs(os.path.join(self.home, "real"))
+        os.symlink(os.path.join(self.home, "real"), os.path.join(self.home, "link"))
+        self.assertEqual(self.found(), {})
+
+    def test_dangling_symlink_is_ignored(self):
+        os.symlink(os.path.join(self.away, "gone"), os.path.join(self.home, ".gone"))
+        self.assertEqual(self.found(), {})
+
+
+class TestPnpmFacts(unittest.TestCase):
+    def setUp(self):
+        self.tmp = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.nm = os.path.join(self.tmp, "proj", "node_modules")
+        self.store = os.path.join(self.tmp, ".pnpm-store", "v11")
+        os.makedirs(self.nm)
+        os.makedirs(self.store)
+
+    def write_meta(self, text):
+        with open(os.path.join(self.nm, ".modules.yaml"), "w") as fh:
+            fh.write(text)
+
+    def test_npm_node_modules_has_no_store(self):
+        self.assertEqual(scan.pnpm_facts(self.nm),
+                         {"pnpm_store": None, "pnpm_store_shared": False})
+
+    def test_store_on_the_same_volume_is_shared(self):
+        self.write_meta('{\n  "layoutVersion": 5,\n  "storeDir": "%s",\n  "virtualStoreDir": ".pnpm"\n}\n'
+                        % self.store)
+        self.assertEqual(scan.pnpm_facts(self.nm),
+                         {"pnpm_store": self.store, "pnpm_store_shared": True})
+
+    def test_store_dir_after_a_large_hoisted_map_is_still_read(self):
+        # A real monorepo's .modules.yaml put storeDir at byte 165840.
+        filler = '  "hoisted": "%s",\n' % ("x" * 200000)
+        self.write_meta('{\n' + filler + '  "storeDir": "%s"\n}\n' % self.store)
+        self.assertTrue(scan.pnpm_facts(self.nm)["pnpm_store_shared"])
+
+    def test_yaml_style_store_dir_is_read(self):
+        self.write_meta("layoutVersion: 5\nstoreDir: %s\n" % self.store)
+        self.assertEqual(scan.pnpm_facts(self.nm)["pnpm_store"], self.store)
+
+    def test_missing_store_is_not_shared(self):
+        self.write_meta('{"storeDir": "%s"}\n' % os.path.join(self.tmp, "nowhere"))
+        self.assertFalse(scan.pnpm_facts(self.nm)["pnpm_store_shared"])
 
 
 class TestCachePath(unittest.TestCase):
@@ -468,6 +571,16 @@ class TestDockerPass(unittest.TestCase):
         script = Path(bindir, "docker")
         script.write_text("\n".join(lines) + "\n")
         os.chmod(str(script), 0o755)
+        if sys.platform.startswith("win"):
+            # Windows cannot run a #!/bin/sh script; shutil.which finds
+            # docker.cmd through PATHEXT, and docker_pass runs that path.
+            cmd = ["@echo off"]
+            if stdout_text is not None:
+                cmd.append('type "%s\\stdout.txt"' % bindir)
+            if stderr_text is not None:
+                cmd.append('type "%s\\stderr.txt" 1>&2' % bindir)
+            cmd.append("exit /b %d" % exit_code)
+            Path(bindir, "docker.cmd").write_text("\r\n".join(cmd) + "\r\n")
         os.environ["PATH"] = bindir + os.pathsep + self._old_path
 
     def test_missing_binary_is_unavailable_and_does_not_raise(self):

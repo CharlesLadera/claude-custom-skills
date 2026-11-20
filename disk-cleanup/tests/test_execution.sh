@@ -10,7 +10,11 @@
 # repo's standing rule for shell snippets.
 set -euo pipefail
 
-SCRATCH="$(mktemp -d)"
+# Pin the scratch tree to the boot volume. /usr/bin/trash sends a file to
+# its own volume's Trash, so a scratch tree under a $TMPDIR on another
+# drive would land in /Volumes/<drive>/.Trashes/<uid>, not ~/.Trash, and
+# every check below would fail.
+SCRATCH="$(mktemp -d /private/tmp/dc-test.XXXXXX)"
 TRASHED_NAMES=()
 
 cleanup() {
