@@ -11,6 +11,7 @@ If you only look at three, look at these. Each ships real code with tests, and e
 | [`context-audit`](#environment-upkeep) | Ranks every enabled plugin and MCP server by always-on token cost against how much you actually use it, then applies the cut list | Took one machine's per-request baseline from 51,590 to 6,495 tokens. Tells "unused here but busy in another repo" apart from "dead everywhere", so a cut never breaks another project |
 | [`disk-cleanup`](#disk-cleanup) | Scans every readable volume and ranks directories, large files and apps biggest-first in one table | The scanner is structurally unable to delete: a safety test fails the 380-test suite if a delete or move call ever appears in its scripts. Removal happens only after you approve each item by name |
 | [`gmail-organize`](#email) | Migrates a mailbox to one label convention, sorts the backlog and installs filters | One file can write, its write allowlist is pinned by tests (112 in the suite), every batch is validated before its first write, and `--undo-last` reverses it. Nothing is ever permanently deleted |
+| [`obsidian-vault`](#notes) | Search, file, link, organize and lint an Obsidian vault by the conventions in the vault's own `CLAUDE.md` | Moving or renaming a note rewrites every link to it (wikilinks, embeds, markdown links, canvas nodes, table pipes) using Obsidian's own resolution rules. Each batch is previewed, approved and committed to the vault's git, so `git revert` undoes it. Nothing is ever deleted, and a safety test pins the writer to one file |
 
 Everything else here is a `SKILL.md` of instructions with no code and no test suite. They are checked by re-reading them against their sibling skills, not by running anything — treat them as well-specified workflows, not verified software.
 
@@ -24,6 +25,7 @@ Everything else here is a `SKILL.md` of instructions with no code and no test su
 | [Environment upkeep](#environment-upkeep) | Keep the Claude Code prompt lean — rank plugins by always-on token cost against real usage |
 | [Disk cleanup](#disk-cleanup) | Scan the whole machine for reclaimable storage and remove only what you approve, item by item |
 | [Email](#email) | Organize a Gmail mailbox into one label convention through the gws CLI, changing only what you approve |
+| [Notes](#notes) | Keep an Obsidian vault organized and its links intact — search, file, link, move, rename, lint |
 | [Media](#media) | Local media tooling — transcribe video/audio with Whisper |
 | [Job search](#job-search) | Scrape Philippine government sources for open, degree-relevant vacancies |
 | [Statusline](#statusline) | A custom status line showing model, context usage, rate limits, and cost |
@@ -110,6 +112,18 @@ Organizing a Gmail mailbox without handing the decisions to the tool.
 It talks to Gmail through the `gws` CLI rather than a Claude connector, so it works on whichever Google account `gws` is signed in as, whatever Claude account runs it. The label convention lives in one file, `references/convention.md`: three `@` action labels you apply by hand, and fixed topic roots (`Clients/`, `Team/`, `Projects/`, `Vendors/`, `Finance/`, `Notify/`, `News/`, `Personal/`).
 
 `scripts/scan.py` only reads — headers, never bodies — and `tests/test_safety.py` fails the suite if a write method ever appears in it. Every change goes through `apply/apply.py`, which validates a whole approved batch before its first write, verifies each op afterwards, and logs every write so `--undo-last` can reverse it. Nothing is permanently deleted; trash is its own table, and the applier re-checks each message (starred, important, client/team/finance labels, age, threads you replied to) before trashing it. Per-mailbox rules and the undo log live in `~/.config/gmail-organize/`, outside this repo.
+
+### Notes
+
+Working in an Obsidian vault without breaking it.
+
+| Skill | Description |
+|---|---|
+| [`obsidian-vault`](./obsidian-vault/SKILL.md) | Find notes, file captures, add links and keep MOCs current, triage the inbox, move/rename/archive notes, import from other folders, and clean up broken links, orphans, empty notes, frontmatter and names — one approved batch at a time |
+
+The conventions belong to the vault, not the skill: the vault's own `CLAUDE.md` describes its folders, naming, frontmatter and templates, and carries a small JSON rules block the linter reads. `references/vault-claude-md.example.md` is a PARA + Zettelkasten starting point.
+
+`scripts/scan.py` only reads. `apply/apply.py` is the only writer: a plan file lists moves, text edits and frontmatter to add, `preview` shows every link it will rewrite, and `run` applies it as one git commit in the vault, refusing a dirty vault unless told to checkpoint first. Writes are confined to the vault (no hidden folders, no symlinks out), nothing is deleted, and nothing is pushed. A move on disk would break every link to the file; `apply.py` rewrites them all, keeping the old visible text as an alias when a name changes.
 
 ### Media
 

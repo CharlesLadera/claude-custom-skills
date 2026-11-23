@@ -19,15 +19,18 @@ To try a change here live, load it for one run with `claude --plugin-dir <skill-
 
 Most skills are prose: no build, no lint, no tests. "Verified" means re-read for contract consistency with sibling skills; it does not mean a command exited 0. Don't claim a skill works because the file was written.
 
-Three ship real code, and those are judged the ordinary way:
+Four ship real code, and those are judged the ordinary way:
 
 - `context-audit/scripts/audit.py` — a script, no test suite.
 - `disk-cleanup/` — `scripts/scan.py`, `scripts/classify.py`, and 380 tests run by `disk-cleanup/tests/run.sh` (macOS, and Windows since `test_windows.py`; the `test_execution.sh` rehearsal runs on macOS only). Run them before and after changing anything there.
 - `gmail-organize/` — `scripts/scan.py` (read-only), `apply/apply.py` (the only writer), `lib/gws.py`, and the tests run by `gmail-organize/tests/run.sh`. Run them before and after changing anything there.
+- `obsidian-vault/` — `lib/vault.py` (vault model: frontmatter, wikilink and markdown-link parsing, Obsidian's link resolution; read-only), `scripts/scan.py` (lint, backlinks, find, unlinked mentions, inbox; read-only), `apply/apply.py` (the only writer: moves and renames that rewrite every link to the moved file, text edits, frontmatter that is only ever added, imports, and a local git commit per batch; no delete, no push, writes confined to the vault), and the tests run by `obsidian-vault/tests/run.sh`. The conventions it enforces live in the vault's own `CLAUDE.md`, not in the skill. Run them before and after changing anything there.
 
 `disk-cleanup/tests/test_safety.py` is load-bearing, not housekeeping: it fails the suite if any deletion or move primitive appears in a file under `disk-cleanup/scripts/`, which is what makes the scanner structurally incapable of deleting. Deletion lives in `SKILL.md`, after approval, by design. Never weaken that test to make a change pass — if a change seems to need it, the change is wrong.
 
 `gmail-organize/tests/test_safety.py` plays the same role: it fails the suite if a write method appears in `scripts/` or `lib/`, if `apply.py`'s write allowlist changes, or if anything other than `scan.gws_read` and `apply.gws_call` reaches `gws`. Same rule — never weaken it to make a change pass.
+
+`obsidian-vault/tests/test_safety.py` is the third: it fails the suite if `lib/` or `scripts/` can write or spawn a process, if `apply.py` gains a delete primitive or a move that can overwrite a file, or if its git verbs grow beyond `rev-parse status add commit log`. Same rule.
 
 Where a skill embeds a shell snippet, run it against a scratch directory before shipping it — those are the parts that can actually be wrong in a checkable way. Even that is not enough on its own: `disk-cleanup`'s snippets passed in a scratch tree and still broke on the real machine twice, once on a GNU `du` flag BSD accepts and silently ignores, and once on a macOS privacy denial that made an approved removal fail without the skill noticing. Run it against the real thing before believing it.
 
