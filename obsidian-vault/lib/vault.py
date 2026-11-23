@@ -16,7 +16,7 @@ import json
 import os
 import re
 import unicodedata
-from datetime import date, datetime
+from datetime import date
 from urllib.parse import unquote
 
 SKIP_DIRS = {".obsidian", ".trash", ".git", ".debris", ".DS_Store"}
@@ -40,11 +40,12 @@ RULES_FENCE = re.compile(r"```json obsidian-vault-rules\s*\n(.*?)\n```", re.S)
 # [[target#heading|alias]] and ![[...]]. Inside a table the pipe is written "\|".
 WIKILINK = re.compile(r"(!?)\[\[([^\[\]\n]*?)\]\]")
 # [text](url) and [text](<url with spaces>), optional "title".
-MDLINK = re.compile(r'(!?)\[([^\]\n]*)\]\((<[^>\n]+>|[^)\s]+)((?:\s+"[^"\n]*")?)\)')
+# The URL may contain balanced parentheses, e.g. Notes%20(draft).md, as CommonMark allows.
+MDLINK = re.compile(r'(!?)\[([^\]\n]*)\]\((<[^>\n]+>|(?:[^()\s]|\([^()\s]*\))+)((?:\s+"[^"\n]*")?)\)')
 SCHEME = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*:")
 FENCE = re.compile(r"^\s*(```|~~~)")
 INLINE_CODE = re.compile(r"`[^`\n]*`")
-INLINE_TAG = re.compile(r"(?<![\w/&#])#([A-Za-z0-9_/\-]*[A-Za-z_/\-][A-Za-z0-9_/\-]*)")
+INLINE_TAG = re.compile(r"(?<![\w/&#\[(])#([A-Za-z0-9_/\-]*[A-Za-z_/\-][A-Za-z0-9_/\-]*)")
 
 
 class Link(object):
@@ -56,9 +57,6 @@ class Link(object):
     def __init__(self, **kw):
         for k in self.__slots__:
             setattr(self, k, kw.get(k))
-
-    def as_dict(self):
-        return {"kind": self.kind, "raw": self.raw, "path": self.path, "line": self.line}
 
 
 def _code_mask(text):
@@ -137,8 +135,16 @@ def inline_tags(text):
 
 # --- frontmatter -----------------------------------------------------------------------
 
+NESTED = {"nested": True}  # value of a key whose children are an indented mapping
+EMPTY_WORDS = ("~", "null", "Null", "NULL")
+
+
 def split_frontmatter(text):
-    """(frontmatter_text_or_None, body). Frontmatter excludes the --- lines."""
+    """(frontmatter_text_or_None, body). Frontmatter excludes the --- lines. A leading
+    byte-order mark is allowed and is not part of either piece."""
+    if text.startswith("\ufeff"):
+        fm, body = split_frontmatter(text[1:])
+        return (fm, body) if fm is not None else (None, text)
     if not text.startswith("---"):
         return None, text
     lines = text.split("\n")
@@ -150,12 +156,85 @@ def split_frontmatter(text):
     return None, text
 
 
-def _scalar(v):
+def _scan(v):
+    """Yield (index, char, quoted) over a YAML value. A quote opens only where the value
+    starts or where a flow-list item starts (inside [...]); double quotes escape with a
+    backslash, single quotes by doubling. Anything after a closing quote is plain."""
+    quote, i, item_start, depth = None, 0, True, 0
+    while i < len(v):
+        c = v[i]
+        if quote == '"' and c == "\\":
+            i += 2
+            continue
+        if quote == "'" and c == "'" and v[i + 1:i + 2] == "'":
+            i += 2
+            continue
+        if quote:
+            if c == quote:
+                quote = None
+            yield i, c, True
+        elif c in "'\"" and item_start:
+            quote, item_start = c, False
+            yield i, c, True
+        else:
+            yield i, c, False
+            if c == "[" and (depth or i == 0 or item_start):
+                depth, item_start = depth + 1, True
+            elif c == "," and depth:
+                item_start = True
+            elif c == "]" and depth:
+                depth, item_start = depth - 1, False
+            elif not c.isspace():
+                item_start = False
+        i += 1
+
+
+def _strip_comment(v):
+    """Drop a YAML "# comment": a # at the start or after whitespace, outside quotes, as
+    YAML (and so Obsidian) reads it. `tags: # later` is empty; quote "#tag" to keep it."""
     v = v.strip()
-    if " #" in v and not v.startswith(("'", '"')):
-        v = v.split(" #", 1)[0].strip()
-    if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"":
-        return v[1:-1]
+    for i, c, quoted in _scan(v):
+        if c == "#" and not quoted and (i == 0 or v[i - 1] in " \t"):
+            return v[:i].rstrip()
+    return v
+
+
+def _split_flow(inner):
+    """Split the inside of a [a, "b, c"] list on commas outside quotes."""
+    parts, last = [], 0
+    for i, c, quoted in _scan("[" + inner):
+        if c == "," and not quoted:
+            parts.append(inner[last:i - 1])
+            last = i
+    parts.append(inner[last:])
+    return parts
+
+
+_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "0": "\0", "\\": "\\", '"': '"', "/": "/",
+            "a": "\a", "b": "\b", "e": "\x1b", "f": "\f", "v": "\v", " ": " ",
+            "N": "\x85", "_": "\xa0", "L": "\u2028", "P": "\u2029"}
+
+
+def _unescape(s):
+    def one(m):
+        e = m.group(1)
+        if e[0] in "xuU":
+            n = int(e[1:], 16)
+            return chr(n) if n <= 0x10FFFF else "\\" + e  # out of range: keep it as written
+        return _ESCAPES.get(e, "\\" + e)
+    out = re.sub(r"\\(x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|.)", one, s)
+    if not re.search(r"\\[uU]", s):
+        return out  # no \u escapes: leave raw bytes (surrogate-escaped) exactly as read
+    # Join escaped surrogate pairs into one character; a lone surrogate becomes U+FFFD.
+    return out.encode("utf-16", "surrogatepass").decode("utf-16", "replace")
+
+
+def _scalar(v):
+    v = _strip_comment(v)
+    if len(v) >= 2 and v[0] == v[-1] == "'":
+        return v[1:-1].replace("''", "'")
+    if len(v) >= 2 and v[0] == v[-1] == '"':
+        return _unescape(v[1:-1])
     return v
 
 
@@ -171,10 +250,12 @@ def parse_frontmatter(fm):
         m = re.match(r"^([^\s:#][^:]*):(.*)$", line)
         if m and not line.startswith((" ", "\t", "-")):
             key = m.group(1).strip()
-            val = m.group(2).strip()
+            if len(key) > 1 and key[0] == key[-1] and key[0] in "\"'":
+                key = key[1:-1]  # "tags": [] is the same key as tags: []
+            val = _strip_comment(m.group(2))
             if val.startswith("[") and val.endswith("]"):
-                data[key] = [_scalar(x) for x in val[1:-1].split(",") if x.strip()]
-            elif val == "":
+                data[key] = [_scalar(x) for x in _split_flow(val[1:-1]) if x.strip()]
+            elif val == "" or val in EMPTY_WORDS:
                 data[key] = None
             else:
                 data[key] = _scalar(val)
@@ -183,8 +264,18 @@ def parse_frontmatter(fm):
         if m and key is not None:
             if not isinstance(data.get(key), list):
                 data[key] = []
-            data[key].append(_scalar(m.group(1)))
+            item = _scalar(m.group(1))
+            data[key].append("" if item in EMPTY_WORDS else item)
+        elif key is not None and line[:1] in (" ", "\t") and data.get(key) is None:
+            data[key] = NESTED  # an indented child mapping: the key has a value
     return data
+
+
+def has_value(v):
+    """True when a frontmatter value holds data: a list needs one non-blank item."""
+    if isinstance(v, list):
+        return any(x is not None and str(x).strip() for x in v)
+    return v not in (None, "")
 
 
 def tags_of(data):
@@ -275,6 +366,14 @@ def link_name(path):
 
 # --- the vault -------------------------------------------------------------------------
 
+def require_dir(root):
+    """Stop when a vault path isn't a folder: walking a missing path finds nothing, which
+    would read as an empty, clean vault."""
+    if not os.path.isdir(os.path.expanduser(root)):
+        raise SystemExit("vault path is not a folder: %s" % root)
+    return os.path.expanduser(root)
+
+
 class Vault(object):
     def __init__(self, root, files=None):
         self.root = os.path.abspath(root)
@@ -294,9 +393,10 @@ class Vault(object):
         return sorted(out)
 
     def _index(self):
-        self.lower = {}
+        self.lower, self.by_name = {}, {}
         for p in self.files:
             self.lower.setdefault(p.lower(), p)
+            self.by_name.setdefault(p.rsplit("/", 1)[-1].lower(), []).append(p)
 
     def with_moves(self, moves):
         """A Vault view with MOVES (old -> new) applied to the file list. Reads stay on disk."""
@@ -309,7 +409,9 @@ class Vault(object):
         return [p for p in self.files if p.lower().endswith(NOTE_EXT)]
 
     def read(self, rel):
-        with open(os.path.join(self.root, rel), encoding="utf-8", errors="replace") as f:
+        """Text exactly as on disk: line endings kept, undecodable bytes carried as
+        surrogates so a write with the same settings restores them byte for byte."""
+        with open(os.path.join(self.root, rel), encoding="utf-8", errors="surrogateescape", newline="") as f:
             return f.read()
 
     def resolve(self, linkpath, source):
@@ -335,7 +437,7 @@ class Vault(object):
         best = None
         for c in cands:
             suffix = "/" + c.lower()
-            for p in self.files:
+            for p in self.by_name.get(c.rsplit("/", 1)[-1].lower(), ()):  # same file name only
                 pl = p.lower()
                 if pl.endswith(suffix):
                     key = (0 if folder(p) == src_dir else 1, p.count("/"), len(p), p)
@@ -385,9 +487,6 @@ def file_created(vault, rel):
     ts = getattr(st, "st_birthtime", None) or st.st_mtime
     return date.fromtimestamp(ts).isoformat()
 
-
-def file_modified(vault, rel):
-    return datetime.fromtimestamp(os.stat(os.path.join(vault.root, rel)).st_mtime).date().isoformat()
 
 
 def load_config(skill_root):

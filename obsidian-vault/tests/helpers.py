@@ -60,3 +60,16 @@ def write(root, rel, text):
 
 def git_log(root):
     return subprocess.run(["git", "-C", root, "log", "--format=%s"], capture_output=True, text=True).stdout
+
+
+def can_symlink():
+    """False on Windows without Developer Mode or admin rights, where os.symlink raises."""
+    d = tempfile.mkdtemp()
+    try:
+        os.symlink(os.path.join(d, "target"), os.path.join(d, "link"))
+        return True
+    except (OSError, NotImplementedError, AttributeError):
+        return False
+
+
+SYMLINKS = can_symlink()

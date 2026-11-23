@@ -30,7 +30,7 @@ UNPORTABLE = re.compile(r'[<>:"|?*\\]|[ .](/|$)')
 
 def open_vault(args):
     root = args.vault or V.load_config(SKILL)["vaultPath"]
-    vault = V.Vault(root)
+    vault = V.Vault(V.require_dir(root))
     return vault, V.load_rules(vault.root)
 
 
@@ -63,6 +63,27 @@ def lint(vault, rules, limit):
             elif hit != p:
                 inbound[hit] += 1
 
+    for p in vault.files:  # canvases link to notes too: file cards and links in text cards
+        if not p.lower().endswith(".canvas"):
+            continue
+        try:
+            data = json.loads(vault.read(p))
+        except ValueError:
+            continue
+        nodes = data.get("nodes") if isinstance(data, dict) else None
+        for node in nodes if isinstance(nodes, list) else []:
+            if not isinstance(node, dict):
+                continue
+            for f in (node.get("file"), node.get("background")):  # file cards, group backgrounds
+                if isinstance(f, str) and f in inbound:
+                    inbound[f] += 1
+            t = node.get("text")
+            if isinstance(t, str):
+                for l in V.parse_links(t):
+                    hit = vault.resolve(l.path, p)
+                    if hit and hit != p:
+                        inbound[hit] += 1
+
     naming = rules["naming"]
     pat = re.compile(naming["pattern"])
     fm_rules = rules["frontmatter"]
@@ -81,7 +102,7 @@ def lint(vault, rules, limit):
             else:
                 # "created|date" means either key satisfies the requirement
                 miss = [k for k in fm_rules["required"]
-                        if not any(r["frontmatter"].get(alt) for alt in k.split("|"))]
+                        if not any(V.has_value(r["frontmatter"].get(alt)) for alt in k.split("|"))]
                 if miss:
                     out["missing_keys"].append({"path": p, "missing": miss})
         if not r["body"].strip() or re.fullmatch(r"\s*(#.*)?\s*", r["body"]):

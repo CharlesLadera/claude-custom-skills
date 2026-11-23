@@ -109,7 +109,8 @@ class TestApplyNeverDeletes(unittest.TestCase):
 
     def test_rename_never_overwrites(self):
         fn = next(n for n in ast.walk(self.t) if isinstance(n, ast.FunctionDef) and n.name == "execute")
-        self.assertIn("os.path.exists(d) and not os.path.samefile(s, d)", ast.get_source_segment(self.src, fn))
+        # Any existing target is refused, the same file included: moves are staged through temp names.
+        self.assertIn("if os.path.lexists(d):", ast.get_source_segment(self.src, fn))
 
     def test_processes_only_through_git_run(self):
         for fn, n, _ in self.calls:

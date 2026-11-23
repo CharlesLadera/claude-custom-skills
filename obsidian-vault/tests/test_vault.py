@@ -86,5 +86,111 @@ class TestNamesAndGlobs(unittest.TestCase):
         self.assertTrue(V.matches_any("x.md", ["*.md"]))
 
 
+
+class TestSuffixTieBreak(unittest.TestCase):
+    def test_same_folder_wins_among_suffix_matches(self):
+        v = V.Vault(make_vault({"x/sub/Note.md": "", "a/sub/Note.md": ""}, git=False))
+        self.assertEqual(v.resolve("sub/Note", "x/sub/s.md"), "x/sub/Note.md")
+        self.assertEqual(v.resolve("sub/Note", "elsewhere.md"), "a/sub/Note.md")
+
+    def test_balanced_parens_in_markdown_url(self):
+        (l,) = V.parse_links("[t](Folder%20(x)/n%20(1).md#h)")
+        self.assertEqual((l.path, l.heading), ("Folder (x)/n (1).md", "#h"))
+
+
+class TestRegateVaultGaps(unittest.TestCase):
+    def test_inline_comments_stripped_unless_quoted(self):
+        self.assertEqual(V.parse_frontmatter("status: draft # wip"), {"status": "draft"})
+        self.assertEqual(V.parse_frontmatter('t: "a # b"'), {"t": "a # b"})
+
+    def test_load_config_errors(self):
+        import json
+        import tempfile
+        d = tempfile.mkdtemp()
+        with self.assertRaises(SystemExit) as cm:
+            V.load_config(d)
+        self.assertIn("config.json missing", str(cm.exception))
+        with open(d + "/config.json", "w") as f:
+            json.dump({"vaultPath": d + "/nope"}, f)
+        with self.assertRaises(SystemExit) as cm:
+            V.load_config(d)
+        self.assertIn("vaultPath does not exist", str(cm.exception))
+        with open(d + "/config.json", "w") as f:
+            json.dump({"vaultPath": d}, f)
+        self.assertEqual(V.load_config(d)["vaultPath"], d)
+
+
+class TestRound2Vault(unittest.TestCase):
+    def test_link_anchors_are_not_tags(self):
+        self.assertEqual(V.inline_tags("see [[#Setup]] and [x](#install) but #real\n"), {"real"})
+
+    def test_bom_frontmatter(self):
+        fm, body = V.split_frontmatter("﻿---\ntitle: x\n---\nbody")
+        self.assertEqual((fm, body), ("title: x", "body"))
+
+
+class TestVaultShouldFix(unittest.TestCase):
+    def test_unterminated_or_malformed_frontmatter(self):
+        self.assertEqual(V.split_frontmatter("---\na: 1\nbody"), (None, "---\na: 1\nbody"))
+        self.assertEqual(V.split_frontmatter("---x\na: 1\n---\n"), (None, "---x\na: 1\n---\n"))
+
+    def test_dot_slash_link(self):
+        v = V.Vault(make_vault({"sub/x.md": ""}, git=False))
+        self.assertEqual(v.resolve("./sub/x", "Home.md"), "sub/x.md")
+
+
+class TestRound4Vault(unittest.TestCase):
+    def test_parser_and_resolver_edges(self):
+        fm = V.parse_frontmatter("# a comment\ntags: a, b\nalias: Foo")
+        self.assertEqual(V.tags_of(fm), {"a", "b"})
+        self.assertEqual(V._aliases(fm), ["Foo"])
+        self.assertTrue(V.matches_any("a1.md", ["a?.md"]))
+        self.assertFalse(V.matches_any("a12.md", ["a?.md"]))
+        v = V.Vault(make_vault({"x/n.md": "", "y/n.md": ""}, git=False))
+        self.assertEqual(v.resolve("", "x/n.md"), "x/n.md")
+        self.assertEqual(v.shortest_linkpath("y/n.md", "z.md"), "y/n")
+
+
+class TestRound6Vault(unittest.TestCase):
+    def test_empty_values_with_comments(self):
+        self.assertEqual(V.parse_frontmatter("tags: [] # todo\nx: \"\" # y\nz: [a] # c"),
+                         {"tags": [], "x": "", "z": ["a"]})
+
+
+class TestRound7Vault(unittest.TestCase):
+    def test_quote_aware_comments(self):
+        self.assertEqual(V.parse_frontmatter('aliases: ["C #1", x] # note')["aliases"], ["C #1", "x"])
+        self.assertEqual(V.parse_frontmatter("title: 'it''s' # todo")["title"], "it's")
+        self.assertEqual(V.parse_frontmatter('t: "a \\" b" # c')["t"], 'a " b')
+        self.assertEqual(V.parse_frontmatter("u: x#y # c")["u"], "x#y")
+
+
+class TestRound8Vault(unittest.TestCase):
+    def test_values_and_quotes(self):
+        P = V.parse_frontmatter
+        # A leading # is a comment, as YAML and Obsidian read it.
+        self.assertEqual(P("tags:\n  - #project\n  - b")["tags"], ["", "b"])
+        self.assertEqual(P("title: #1 priority")["title"], None)
+        self.assertEqual(P("tags: # fill in later")["tags"], None)
+        self.assertEqual(P('tags: ["#a", "#b"]')["tags"], ["#a", "#b"])
+        self.assertEqual(P("title: Hello, \"world # x\"")["title"], 'Hello, "world')
+        self.assertEqual(P("t: \"a\" 'b # c")["t"], "\"a\" 'b")
+        self.assertEqual(P('t: "\\UFFFFFFFF \\ud83d\\ude00 \\N"')["t"], "\\UFFFFFFFF \U0001F600 \x85")
+        self.assertEqual(P("t: x \"y # z")["t"], 'x "y')
+        self.assertEqual(P("t: Say 'hi # there")["t"], "Say 'hi")
+        self.assertEqual(P('t: "line\\nbreak\\t\\u00e9"')["t"], "line\nbreak\té")
+        self.assertEqual(P('aliases: ["a, b", c, \'d, e\']')["aliases"], ["a, b", "c", "d, e"])
+
+
+class TestFinalVault(unittest.TestCase):
+    def test_flow_close_and_raw_bytes(self):
+        P = V.parse_frontmatter
+        self.assertEqual(P('tags: [] "a # b"')["tags"], '[] "a')
+        self.assertEqual(P('aliases: ["Caf\udce9"]')["aliases"], ["Caf\udce9"])
+        self.assertEqual(V.has_value(["", None]), False)
+        self.assertEqual(V.has_value(["x"]), True)
+
+
+
 if __name__ == "__main__":
     unittest.main()
