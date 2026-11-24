@@ -175,6 +175,7 @@ Or in one step inside a session (Claude Code 2.1.275+):
 | `context-audit` | `context-audit` |
 | `disk-cleanup` | `disk-cleanup` |
 | `gmail-organize` | `gmail-organize` |
+| `obsidian-vault` | `obsidian-vault` |
 | `dev-workflow` | `start-of-day`, `end-of-day`, `side-note`, `save-conversation`, `daily-report`, `start-ticket`, `resume-ticket`, `finish-ticket`, `ticket-status`, `rebuild-integration` |
 | `transcribe-video` | `transcribe-video` |
 | `gov-job-finder` | `gov-job-finder` |
@@ -208,7 +209,7 @@ To take just one skill, link only that directory:
 ln -sfn ~/claude-custom-skills/disk-cleanup ~/.claude/skills/disk-cleanup
 ```
 
-The skills in `dev-workflow` — the journaling trio, the ticket family, `save-conversation` and `daily-report` — read files the others write and follow `start-ticket`'s **Context home** rule, so link them together. `context-audit`, `disk-cleanup`, `gmail-organize`, `transcribe-video` and `gov-job-finder` stand alone.
+The skills in `dev-workflow` — the journaling trio, the ticket family, `save-conversation` and `daily-report` — read files the others write and follow `start-ticket`'s **Context home** rule, so link them together. `context-audit`, `disk-cleanup`, `gmail-organize`, `obsidian-vault`, `transcribe-video` and `gov-job-finder` stand alone.
 
 ### Requirements
 
@@ -217,6 +218,7 @@ The skills in `dev-workflow` — the journaling trio, the ticket family, `save-c
 | `context-audit` | `python3`, the `claude` CLI |
 | `disk-cleanup` | `python3` (`python` on Windows). macOS and Windows are vetted; Linux gets a small, conservative starter manifest. On Windows the skill runs approved package-manager commands only and hands every other removal to you |
 | `gmail-organize` | `python3`, `gws` (`npm install -g @googleworkspace/cli`, then `gws auth login`) |
+| `obsidian-vault` | `python3` (`python` on Windows), `git`. The vault must be the root of its own git repo: every approved batch is a local commit |
 | `end-of-day`, `start-of-day`, ticket family | `git`, [`gh`](https://cli.github.com/) for PR status |
 | `transcribe-video` | `whisper` (`pip install openai-whisper`), `ffmpeg` |
 | `daily-report` | an MCP for your PM tool (Jira, Linear, Monday.com, …), optionally Gmail |
