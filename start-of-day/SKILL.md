@@ -11,7 +11,7 @@ Sessions are per-thread journals at `docs/custom-agents/memory/sessions/<slug>.m
 ## Argument Reference
 | Argument | Behavior |
 |----------|---------|
-| *(none)* | List active + paused sessions; ask which to focus |
+| *(none)* | List active + paused sessions, and waiting ones in their own group; ask which to focus |
 | `<slug>` | Open that session's journal (full history, latest entry highlighted) |
 | `all` | List sessions including `done` ones |
 | `legacy` | Legacy dated-journal briefing (most recent file) |
@@ -33,7 +33,7 @@ Read `$CFG` if it exists: `taskFilesDir` (default `docs/custom-agents/tasks`), `
 Then the **context root** every step below reads, per start-ticket's **Context home** rule: with `contextBranch` set, `CA="$HUB/docs/custom-agents"` (and `ROOT="$HUB"` for repo-relative keys like `taskFilesDir`) — verify the hub is on `contextBranch` and **STOP** if not; in local mode (folder gitignored), the same `CA`/`ROOT` with no branch check; otherwise `CA="$(pwd)/docs/custom-agents"`, `ROOT="$(pwd)"`, exactly as before.
 
 ### 1. Parse the argument
-- **none** → list mode (active + paused).
+- **none** → list mode (active + paused, plus waiting in its own group).
 - **`all`** → list mode, including `done`.
 - **`legacy [...]`** → legacy daily briefing (step 5).
 - **anything else** → treat as a `<slug>`; if it matches a `sessions/*.md`, focus it (step 4), otherwise show the list and note no such session.
@@ -43,7 +43,7 @@ Then the **context root** every step below reads, per start-ticket's **Context h
 ls "$CA/memory/sessions/"*.md 2>/dev/null | sort
 ```
 - **If none found**: tell the user there are no per-session journals yet; suggest `/end-of-day` to create one, and mention `/start-of-day legacy` if old dated journals exist.
-- **If files exist**: read each file's frontmatter (`session`, `status`, `branch`, `pr`, `last_updated`) and its latest `### 🎯 Next Session Plan` bullet.
+- **If files exist**: read each file's frontmatter (`session`, `status`, `branch`, `pr`, `last_updated`, and on a `waiting` journal `waiting_on`, `waiting_since`, `follow_up`), its latest `### 🎯 Next Session Plan` bullet and, on a `waiting` journal, its latest **Waiting on** line.
 
 ### 2.5. Reconcile ticket delivery status
 Task files carry **two status axes**: `status:` (implementation — the author's work: `in progress`/`complete`/`blocked`) and `ticket:` (delivery — the PR's journey to prod: `in-review` → `merged` → `done`). While you were away, PRs that were `in-review` may have merged. Reconcile the local `ticket:` field before briefing so the day starts from truth:
@@ -72,7 +72,20 @@ Exclude `status: done` unless `all` was passed. Sort by `last_updated`, newest f
 > | `csv-export` | active | 2026-07-08 | `feat/…` · #47 | Merge PR #47 |
 > | … | | | | |
 >
+> **Waiting on someone (2):**
+>
+> | Session | Waiting on | Since | Follow up | For |
+> |---------|------------|-------|-----------|-----|
+> | `pricing-page` | Alex | 07-06 | 07-10 | Sign-off on the pricing copy |
+> | `sso-setup` | Sam | 07-01 | **due 07-07** | Admin access to the identity provider |
+>
 > Which session do you want to focus on? (`all` to include finished ones · `legacy` for the old daily journals)
+
+**Waiting sessions** (`status: waiting`) never go in the active table. They get one **Waiting on someone** table after it, with a count in its heading:
+- "Waiting on" is `waiting_on`, "Since" is `waiting_since` as `MM-DD`, "For" is the thing waited for from the latest **Waiting on** line with the person prefix cut (else the first Next Session Plan item, shortened). An empty field is `—`.
+- "Follow up" is `follow_up` as `MM-DD`. When that date is today or earlier, write it **bold** as `**due MM-DD**`: those are the threads to chase today. Sort due rows first, then by `follow_up` (rows without one last), then by `waiting_since`.
+- A `waiting` journal with no `waiting_on` (written by hand or before this status existed) still goes here, with `—` in the empty columns.
+- Leave the table out when no session is waiting.
 
 Wait for the user to choose — do not auto-open a session.
 
@@ -80,6 +93,8 @@ Wait for the user to choose — do not auto-open a session.
 For the chosen `<slug>`, Read `sessions/<slug>.md` and present its **latest** dated entry as the brief (earlier entries remain in the file for scrollback):
 
 > **Session `<slug>` — [latest date]**  ·  status `[status]` · branch `[branch]` · PR [pr]
+>
+> ⏳ **Waiting on [waiting_on] since [waiting_since]** for [what] · follow up [follow_up]   ← only when status is `waiting`; mark the follow-up **due** when it is today or past
 >
 > ✅ **What was done:**
 > [Accomplished bullets]

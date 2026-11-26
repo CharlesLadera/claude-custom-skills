@@ -159,7 +159,7 @@ Ask the questions only when the session can't answer them: a fresh session with 
 Decide two things in request 2 — they drive Step 7 and the journal's `status`:
 
 - **Land decision** — the journal **always** lands (on `main` in Step 7A, on `contextBranch` in Step 7, or — in local mode — nowhere but this machine, done by writing it), CI-independent, so this is only about the **code**: ask **"Is this session's work complete — also merge the whole branch to `main` (auto-merge when checks pass), or keep the code on the branch for now?"** Merging the branch is outward-facing, so **merging = required confirm**. Choose **merge branch** when the work is done; **code stays** when mid-work — unfinished code stays off `main` while the journal still lands.
-- **Status** — hint from the gather's "in `<default-branch>` already?". Propose `done` when you're merging the branch **and** the work is complete (or the branch is already merged/gone); else `active`, or `paused` if setting it down for a while. **Confirm** before setting `done`. A `done` session drops off the default `/start-of-day` list (still visible via `/start-of-day all`).
+- **Status** — hint from the gather's "in `<default-branch>` already?". Propose `done` when you're merging the branch **and** the work is complete (or the branch is already merged/gone); else `active`, or `paused` if setting it down for a while. Propose `waiting` when every pending item waits on someone else's reply or action (an email out to a client, access someone has to grant) and nothing is left for Claude or the user to do until it arrives, apart from following up. A thread that still has work of our own besides the wait stays `active`, with the wait as a blocker. With `waiting`, confirm who it waits on, since when (the day the ask went out, not today when it went out earlier), and an optional follow-up date (when to chase or take the fallback). On a journal that is already `waiting`, the gather's frontmatter shows the stored values: pass only what changes, and the chain keeps the rest. **Confirm** before setting `done` or `waiting`. A `done` session drops off the default `/start-of-day` list (still visible via `/start-of-day all`). A `waiting` session stays on it, in its own group, and a daily-report reader can list it apart from work and blockers.
 
 Then the journal, written by the land chain (request 3) from the gather's printout:
 - **New file** → frontmatter + today's dated entry.
@@ -168,12 +168,15 @@ Then the journal, written by the land chain (request 3) from the gather's printo
 ```markdown
 ---
 session: <slug>
-status: active            # active | paused | done
+status: active            # active | paused | waiting | done
 branch: <branch>
 pr: <number or "">
 related_conversation: <conversation folder slug or "">
 created: YYYY-MM-DD
 last_updated: YYYY-MM-DD
+waiting_on: <who>          # these three only with status: waiting; the land chain adds and removes them
+waiting_since: YYYY-MM-DD
+follow_up: YYYY-MM-DD      # optional
 ---
 
 ## YYYY-MM-DD (Weekday)
@@ -197,6 +200,7 @@ last_updated: YYYY-MM-DD
 - **Did:** [1–3 plain sentences: what got done that matters to the team]
 - **Next:** [1 sentence: what this thread does next]
 - **Blockers/asks:** [who is needed for what, or "none"]
+- **Waiting on:** [only when status is waiting: who, for what — "Alex: sign-off on the pricing copy"]
 
 ### 📝 Notes & Context
 - [bullets from answer 4]
@@ -207,6 +211,7 @@ last_updated: YYYY-MM-DD
 - **Today only:** what this run did, not the thread's whole history.
 - **Numbers that matter**, rounded: "~3,500 cases (~9%)".
 - **Blockers name the person and the ask** ("Alex: IP allow-list"). Say "none" when there are none; don't omit the line.
+- **Waiting on** is only for a `waiting` journal, and then it is required: person, colon, what you're waiting for. The thing waited on goes here, not under Blockers (say "none" there unless something else blocks). Leave the line out on any other status.
 - **Consistent with the 🎯 plan:** "Next" is the plan's first one or two items in plain words.
 
 ### 7. Land (request 3)
@@ -232,7 +237,8 @@ PR=<existing PR number or "">
 PR_TITLE='<confirmed title>'                  # '' = don't open one
 PR_BODY='<confirmed body>'
 MERGE=<yes|no>                                # Step 6's land decision
-STATUS=<active|paused|done>
+STATUS=<active|paused|waiting|done>
+WAITING_ON='<who>'; WAITING_SINCE=<YYYY-MM-DD>; FOLLOW_UP=<YYYY-MM-DD>   # only with STATUS=waiting. Empty keeps the journal's stored value; FOLLOW_UP=none clears it
 WT=""; CTX=""
 fail() {
   echo "FAILED at: $1 — fix it, then rerun from that step"
@@ -269,12 +275,21 @@ mkdir -p "$(dirname "$JW")"
 cat >> "$JW" <<'JOURNAL'
 <the entry, in Step 6's format — `__PR__` and `__CODE_COMMIT__` where the PR number and new commit go>
 JOURNAL
-STATUS="$STATUS" TODAY="$TODAY" PR="$PR" CODE_COMMIT="${CODE_COMMIT:-}" perl -pi -e '
-  $fm++ if /^---\s*$/;
-  if ($fm == 1) {                       # frontmatter only
+STATUS="$STATUS" TODAY="$TODAY" PR="$PR" CODE_COMMIT="${CODE_COMMIT:-}" \
+WAITING_ON="${WAITING_ON:-}" WAITING_SINCE="${WAITING_SINCE:-}" FOLLOW_UP="${FOLLOW_UP:-}" perl -pi -e '
+  BEGIN { @wk = qw(waiting_on waiting_since follow_up);           # set only while STATUS is waiting
+          %w = $ENV{STATUS} eq "waiting" ? map { $_ => $ENV{uc $_} } @wk : () }
+  if (/^---\s*$/) {
+    $fm++;                              # closing ---: add the waiting_* lines the file lacks
+    $_ = join("", map { "$_: $w{$_}\n" } grep { !$seen{$_} && length $w{$_} && $w{$_} ne "none" } @wk) . $_ if $fm == 2;
+  } elsif ($fm == 1) {                  # frontmatter only
     s/^status:.*/status: $ENV{STATUS}/;
     s/^last_updated:.*/last_updated: $ENV{TODAY}/;
     s/^pr:.*/pr: $ENV{PR}/ if length $ENV{PR};
+    if (/^(waiting_on|waiting_since|follow_up):/) {     # not waiting: drop; empty value: keep; none: clear
+      $seen{$1} = 1;
+      $_ = $ENV{STATUS} ne "waiting" || $w{$1} eq "none" ? "" : length $w{$1} ? "$1: $w{$1}\n" : $_;
+    }
   }
   s/__PR__/$ENV{PR}/g; s/__CODE_COMMIT__/$ENV{CODE_COMMIT}/g;' "$JW" || fail "journal refresh"
 
@@ -330,4 +345,4 @@ fi
 7A already put the journal on `main`, so the branch carries an identical journal commit; whenever the branch merges (now or a later session) git reconciles it cleanly — no duplication. (With `contextBranch`, in local mode, or run from the default branch, the current branch carries no journal commit at all.) If the local default branch is checked out in another worktree, the last lines do nothing — the next `/start-of-day` fetch reconciles it, and an auto-merge that completes after you've signed off lands the same way.
 
 ### 8. Report (request 4 — text only)
-From the chain's output, no further calls. Report: session file path, resolved `status`, the branch's push state and PR URL, where the journal landed — the **context PR** on `main`, the commit sha pushed to `contextBranch`, or "local only, not committed" — and whether the **code** is merging (whole-branch auto-merge) or staying on the branch for later. If any changes were left untouched as unrelated, list them with the reminder to branch them separately. If `status: done`, note it drops off the default `/start-of-day` list. End with the entry's **🎯 Next Session Plan** and **🗣 For the daily report** lines quoted back, so the user can confirm what the daily-report session will pick up.
+From the chain's output, no further calls. Report: session file path, resolved `status`, the branch's push state and PR URL, where the journal landed — the **context PR** on `main`, the commit sha pushed to `contextBranch`, or "local only, not committed" — and whether the **code** is merging (whole-branch auto-merge) or staying on the branch for later. If any changes were left untouched as unrelated, list them with the reminder to branch them separately. If `status: done`, note it drops off the default `/start-of-day` list. If `status: waiting`, name who it waits on and the follow-up date. End with the entry's **🎯 Next Session Plan** and **🗣 For the daily report** lines quoted back, so the user can confirm what the daily-report session will pick up.
